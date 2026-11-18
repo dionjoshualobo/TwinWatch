@@ -158,6 +158,9 @@ class Repository {
         return snap.documents.firstOrNull()?.toGroup()
     }
 
+    private suspend fun memberIds(groupId: String): List<String> =
+        group(groupId)?.memberUids ?: emptyList()
+
     private fun newCode(): String {
         val alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
         return (1..6).map { alphabet[Random.nextInt(alphabet.length)] }.joinToString("")
@@ -177,7 +180,7 @@ class Repository {
                 "memberUids" to group.memberUids
             )
         ).await()
-        addMember(ref.id, uid, myName)
+        addMember(ref.id, uid, myName, group.memberUids)
         subscribe(ref.id)
         return group
     }
@@ -187,15 +190,22 @@ class Repository {
         if (!group.memberUids.contains(uid)) {
             db.collection("groups").document(group.id)
                 .update("memberUids", FieldValue.arrayUnion(uid)).await()
-            addMember(group.id, uid, myName)
+            addMember(group.id, uid, myName, group.memberUids + uid)
         }
         subscribe(group.id)
         return group
     }
 
-    private suspend fun addMember(groupId: String, uid: String, name: String) {
+    private suspend fun addMember(groupId: String, uid: String, name: String, memberUids: List<String>) {
         db.collection("groups").document(groupId).collection("members").document(uid)
-            .set(mapOf("uid" to uid, "name" to name, "joinedAt" to System.currentTimeMillis()))
+            .set(
+                mapOf(
+                    "uid" to uid,
+                    "name" to name,
+                    "memberUids" to memberUids,
+                    "joinedAt" to System.currentTimeMillis()
+                )
+            )
             .await()
     }
 
@@ -210,6 +220,7 @@ class Repository {
                 "name" to show.name,
                 "imageUrl" to (show.image?.medium ?: show.image?.original ?: ""),
                 "addedBy" to uid,
+                "memberUids" to memberIds(groupId),
                 "addedAt" to System.currentTimeMillis()
             )
         ).await()
@@ -225,6 +236,7 @@ class Repository {
     ) {
         val watched = db.collection("groups").document(groupId)
             .collection("watched").document(uid).collection("episodes")
+        val groupMemberUids = memberIds(groupId)
         db.runBatch { batch ->
             episodes.forEach { ep ->
                 batch.set(
@@ -233,6 +245,7 @@ class Repository {
                         "season" to ep.season,
                         "number" to ep.number,
                         "name" to ep.name,
+                        "memberUids" to groupMemberUids,
                         "markedAt" to System.currentTimeMillis()
                     )
                 )
@@ -243,6 +256,7 @@ class Repository {
                     "uid" to uid,
                     "authorName" to authorName,
                     "showId" to show.id,
+                    "memberUids" to groupMemberUids,
                     "body" to "$authorName $summary of ${show.name}",
                     "createdAt" to System.currentTimeMillis()
                 )
@@ -271,6 +285,7 @@ class Repository {
             "episode" -> "S${season.toString().padStart(2, '0')}E${episode.toString().padStart(2, '0')} of ${show.name}"
             else -> show.name
         }
+        val groupMemberUids = memberIds(groupId)
         db.runBatch { batch ->
             batch.set(
                 db.collection("groups").document(groupId).collection("notes").document(),
@@ -283,6 +298,7 @@ class Repository {
                     "episode" to episode,
                     "text" to text,
                     "isPublic" to isPublic,
+                    "memberUids" to groupMemberUids,
                     "createdAt" to System.currentTimeMillis()
                 )
             )
@@ -293,6 +309,7 @@ class Repository {
                         "uid" to uid,
                         "authorName" to authorName,
                         "showId" to show.id,
+                        "memberUids" to groupMemberUids,
                         "body" to "$authorName wrote a note about $where",
                         "createdAt" to System.currentTimeMillis()
                     )
