@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "222609798183",
+    "project_id": "watch-together-dion",
+    "storage_bucket": "watch-together-dion.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:222609798183:android:216300e9c2931590078a02",
+        "android_client_info": {
+          "package_name": "com.dionlobo.watchtogether"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCw_e4tR61kREQeLk7lY1-2sfcJyxVPQQc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
