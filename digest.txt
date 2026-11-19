@@ -1,0 +1,3840 @@
+Directory structure:
+└── watchtogether/
+    ├── build.gradle.kts
+    ├── firebase.json
+    ├── firestore.rules
+    ├── gradle.properties
+    ├── settings.gradle.kts
+    ├── app/
+    │   ├── build.gradle.kts
+    │   ├── google-services.json
+    │   ├── proguard-rules.pro
+    │   └── src/
+    │       └── main/
+    │           ├── AndroidManifest.xml
+    │           ├── java/
+    │           │   └── com/
+    │           │       └── dionlobo/
+    │           │           └── watchtogether/
+    │           │               ├── App.kt
+    │           │               ├── Design.kt
+    │           │               ├── MainViewModel.kt
+    │           │               ├── Model.kt
+    │           │               ├── Notifications.kt
+    │           │               ├── Reminders.kt
+    │           │               ├── Repository.kt
+    │           │               ├── Screens.kt
+    │           │               └── TvmazeApi.kt
+    │           └── res/
+    │               ├── drawable/
+    │               │   └── ic_launcher_foreground.xml
+    │               ├── mipmap-anydpi-v26/
+    │               │   └── ic_launcher.xml
+    │               ├── values/
+    │               │   ├── colors.xml
+    │               │   ├── strings.xml
+    │               │   └── styles.xml
+    │               └── xml/
+    │                   ├── backup_rules.xml
+    │                   └── data_extraction_rules.xml
+    └── icon-concepts/
+        ├── README.md
+        └── cinematic-studio/
+            └── README.md
+
+================================================
+FILE: build.gradle.kts
+================================================
+plugins {
+    id("com.android.application") version "8.11.1" apply false
+    id("org.jetbrains.kotlin.android") version "2.2.20" apply false
+    id("org.jetbrains.kotlin.plugin.compose") version "2.2.20" apply false
+    id("com.google.gms.google-services") version "4.4.4" apply false
+}
+
+
+
+================================================
+FILE: firebase.json
+================================================
+{
+  "firestore": {
+    "rules": "firestore.rules"
+  }
+}
+
+
+
+================================================
+FILE: firestore.rules
+================================================
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    match /users/{uid} {
+      allow read, write: if signedIn() && request.auth.uid == uid;
+    }
+
+    match /groups/{groupId} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.auth.uid in request.resource.data.memberUids;
+      allow update: if signedIn() && (
+        request.auth.uid in resource.data.memberUids ||
+        (
+          request.auth.uid in request.resource.data.memberUids &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberUids'])
+        )
+      );
+      allow delete: if signedIn() && request.auth.uid in resource.data.memberUids;
+
+      match /members/{memberUid} {
+        allow read: if signedIn();
+        allow create: if signedIn() && request.auth.uid in request.resource.data.memberUids;
+        allow update, delete: if signedIn() && request.auth.uid in resource.data.memberUids;
+      }
+
+      match /shows/{showId} {
+        allow read: if signedIn();
+        allow create: if signedIn() && request.auth.uid in request.resource.data.memberUids;
+        allow update, delete: if signedIn() && request.auth.uid in resource.data.memberUids;
+      }
+
+      match /watched/{memberUid} {
+        allow read: if signedIn();
+        allow delete: if signedIn() && request.auth.uid == memberUid;
+
+        match /episodes/{episodeId} {
+          allow read: if signedIn();
+          allow create, update: if signedIn() && request.auth.uid == memberUid &&
+            request.auth.uid in request.resource.data.memberUids;
+          allow delete: if signedIn() && (
+            request.auth.uid == memberUid ||
+            request.auth.uid in resource.data.memberUids
+          );
+        }
+      }
+
+      match /notes/{noteId} {
+        allow read: if signedIn() && (resource.data.isPublic == true || resource.data.uid == request.auth.uid);
+        allow create: if signedIn() &&
+          request.auth.uid == request.resource.data.uid &&
+          request.auth.uid in request.resource.data.memberUids;
+        allow update: if signedIn() && resource.data.uid == request.auth.uid;
+        allow delete: if signedIn() && (
+          resource.data.uid == request.auth.uid ||
+          request.auth.uid in resource.data.memberUids
+        );
+      }
+
+      match /events/{eventId} {
+        allow read: if signedIn();
+        allow create: if signedIn() &&
+          request.auth.uid == request.resource.data.uid &&
+          request.auth.uid in request.resource.data.memberUids;
+        allow update: if false;
+        allow delete: if signedIn() && request.auth.uid in resource.data.memberUids;
+      }
+    }
+  }
+}
+
+
+
+================================================
+FILE: gradle.properties
+================================================
+org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+org.gradle.parallel=true
+android.useAndroidX=true
+android.nonTransitiveRClass=true
+kotlin.code.style=official
+
+
+
+================================================
+FILE: settings.gradle.kts
+================================================
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.name = "WatchTogether"
+include(":app")
+
+
+
+================================================
+FILE: app/build.gradle.kts
+================================================
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
+    id("com.google.gms.google-services")
+}
+
+android {
+    namespace = "com.dionlobo.watchtogether"
+    compileSdk = 35
+
+    defaultConfig {
+        applicationId = "com.dionlobo.watchtogether"
+        minSdk = 26
+        targetSdk = 35
+        versionCode = 1
+        versionName = "1.0"
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+
+    buildFeatures {
+        compose = true
+    }
+}
+
+dependencies {
+    val composeBom = platform("androidx.compose:compose-bom:2025.08.00")
+    implementation(composeBom)
+    androidTestImplementation(composeBom)
+
+    implementation("androidx.core:core-ktx:1.16.0")
+    implementation("androidx.activity:activity-compose:1.10.1")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.9.1")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.1")
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.ui:ui-tooling-preview")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
+    implementation("androidx.navigation:navigation-compose:2.9.0")
+    implementation("androidx.work:work-runtime-ktx:2.10.0")
+
+    implementation(platform("com.google.firebase:firebase-bom:34.1.0"))
+    implementation("com.google.firebase:firebase-auth")
+    implementation("com.google.firebase:firebase-firestore")
+    implementation("com.google.firebase:firebase-messaging")
+
+    implementation("com.squareup.retrofit2:retrofit:2.11.0")
+    implementation("com.squareup.retrofit2:converter-gson:2.11.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.10.2")
+    implementation("io.coil-kt:coil-compose:2.7.0")
+
+    debugImplementation("androidx.compose.ui:ui-tooling")
+}
+
+
+
+================================================
+FILE: app/google-services.json
+================================================
+{
+  "project_info": {
+    "project_number": "222609798183",
+    "project_id": "watch-together-dion",
+    "storage_bucket": "watch-together-dion.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:222609798183:android:216300e9c2931590078a02",
+        "android_client_info": {
+          "package_name": "com.dionlobo.watchtogether"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBBMubJ_G-jRR67LIERYs4g1KGAGvZN7zQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
+
+
+
+================================================
+FILE: app/proguard-rules.pro
+================================================
+[Empty file]
+
+
+================================================
+FILE: app/src/main/AndroidManifest.xml
+================================================
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:supportsRtl="true"
+        android:theme="@style/WatchTogetherTheme">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <intent-filter android:autoVerify="false">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="watchtogether" android:host="join" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name=".WatchMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="watch_together_activity" />
+    </application>
+
+</manifest>
+
+
+
+================================================
+FILE: app/src/main/java/com/dionlobo/watchtogether/App.kt
+================================================
+package com.dionlobo.watchtogether
+
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.GroupAdd
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+
+sealed class Screen {
+    data object Splash : Screen()
+    data object Onboarding : Screen()
+    data object Groups : Screen()
+    data object Join : Screen()
+    data object Settings : Screen()
+    data class GroupDetail(val group: Group) : Screen()
+    data class MemberDetail(val group: Group, val member: Member) : Screen()
+    data class ShowDetail(val group: Group, val show: ShowEntry) : Screen()
+    data class GroupProgress(val group: Group, val show: ShowEntry) : Screen()
+    data class AddShow(val group: Group) : Screen()
+}
+
+internal fun extractInviteCode(input: String): String {
+    val trimmed = input.trim()
+    if (trimmed.isBlank()) return ""
+    val uri = runCatching { Uri.parse(trimmed) }.getOrNull()
+    val raw = when {
+        uri?.scheme == "watchtogether" && uri.host == "join" ->
+            uri.getQueryParameter("code") ?: uri.lastPathSegment
+        else -> trimmed
+    } ?: trimmed
+    return raw.filter { it.isLetterOrDigit() }.uppercase().take(6)
+}
+
+class MainActivity : ComponentActivity() {
+    private val vm: MainViewModel by viewModels()
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        readIntent(intent)
+        setContent {
+            AppTheme(darkTheme = vm.darkTheme) {
+                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                    AppRoot(vm, intent.getStringExtra("groupId"))
+                }
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        readIntent(intent)
+    }
+
+    private fun readIntent(intent: Intent?) {
+        val uri = intent?.data ?: return
+        if (uri.scheme == "watchtogether" && uri.host == "join") {
+            val code = extractInviteCode(uri.toString())
+            if (code.length >= 4) vm.submitJoinCode(code)
+        }
+    }
+}
+
+@Composable
+fun AppRoot(vm: MainViewModel, startGroupId: String?) {
+    val stack = remember { mutableStateListOf<Screen>(Screen.Splash) }
+    val current = stack.last()
+
+    BackHandler(enabled = stack.size > 1) { stack.removeAt(stack.size - 1) }
+
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    LaunchedEffect(vm.uid) {
+        if (vm.uid != null && Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
+    fun go(screen: Screen) {
+        stack.add(screen)
+    }
+
+    fun replace(screen: Screen) {
+        stack.clear()
+        stack.add(screen)
+    }
+
+    when (current) {
+        Screen.Splash -> SplashScreen(vm, startGroupId, ::replace, ::go)
+        Screen.Onboarding -> OnboardingScreen(vm) { replace(Screen.Groups) }
+        Screen.Groups -> GroupsScreen(vm, ::go)
+        Screen.Join -> JoinScreen(vm, ::replace, { stack.removeAt(stack.size - 1) })
+        Screen.Settings -> SettingsScreen(vm) { stack.removeAt(stack.size - 1) }
+        is Screen.GroupDetail -> GroupDetailScreen(vm, current.group, ::go)
+        is Screen.MemberDetail -> MemberDetailScreen(vm, current.group, current.member, ::go)
+        is Screen.ShowDetail -> ShowDetailScreen(vm, current.group, current.show, ::go)
+        is Screen.GroupProgress -> GroupProgressScreen(vm, current.group, current.show, ::go)
+        is Screen.AddShow -> AddShowScreen(vm, current.group) { stack.removeAt(stack.size - 1) }
+    }
+
+    vm.message?.let { msg ->
+        AlertDialog(
+            onDismissRequest = { vm.clearMessage() },
+            containerColor = Brand.Surface,
+            shape = RoundedCornerShape(24.dp),
+            title = { Text("Something went wrong", color = Brand.Ink, fontWeight = FontWeight.Bold) },
+            text = { Text(msg, color = Brand.Muted) },
+            confirmButton = {
+                PunchButton("OK", { vm.clearMessage() }, modifier = Modifier.width(110.dp), color = Brand.Coral)
+            }
+        )
+    }
+}
+
+@Composable
+fun SplashScreen(
+    vm: MainViewModel,
+    startGroupId: String?,
+    replace: (Screen) -> Unit,
+    go: (Screen) -> Unit
+) {
+    val uid = vm.uid
+    LaunchedEffect(vm.ready, uid, vm.myName, vm.pendingJoinCode, startGroupId) {
+        if (!vm.ready || uid == null) return@LaunchedEffect
+        when {
+            vm.myName.isBlank() -> replace(Screen.Onboarding)
+            vm.pendingJoinCode != null -> replace(Screen.Join)
+            startGroupId != null -> {
+                try {
+                    val group = vm.repo.group(startGroupId)
+                    if (group != null) replace(Screen.GroupDetail(group)) else replace(Screen.Groups)
+                } catch (e: Exception) {
+                    if (!e.isCancellation()) vm.message = e.localizedMessage ?: "Could not open circle"
+                }
+            }
+            else -> replace(Screen.Groups)
+        }
+    }
+    DecorBackground {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(32.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            AnimatedEnter {
+                SoftCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            repeat(6) {
+                                Box(
+                                    Modifier.size(width = 22.dp, height = 9.dp)
+                                        .clip(RoundedCornerShape(9.dp))
+                                        .background(listOf(Brand.Blue, Brand.Amber, Brand.Mint, Brand.Coral)[it % 4])
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(28.dp))
+                        Text("TWIN", style = MaterialTheme.typography.displayLarge, color = Brand.Ink)
+                        Text("WATCH", style = MaterialTheme.typography.displayLarge, color = Brand.Blue)
+                        Spacer(Modifier.height(10.dp))
+                        Text("Your group's episode ledger.", color = Brand.Muted, textAlign = TextAlign.Center)
+                    }
+                }
+            }
+            Spacer(Modifier.height(28.dp))
+            CircularProgressIndicator(color = Brand.Blue, strokeWidth = 4.dp)
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun OnboardingScreen(vm: MainViewModel, onDone: () -> Unit) {
+    var name by remember { mutableStateOf("") }
+    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
+    DecorBackground {
+        Column(
+            modifier = Modifier.padding(24.dp).fillMaxSize(),
+            verticalArrangement = Arrangement.Center
+        ) {
+            AnimatedEnter {
+                ScreenHeader(
+                    step = "00 / TAKE YOUR SEAT",
+                    title = "Let's watch together.",
+                    subtitle = "No account. No email. Just a name your people will recognize.",
+                    accent = Brand.Coral
+                )
+            }
+            Spacer(Modifier.height(22.dp))
+            AnimatedEnter(80) {
+                SoftCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(20.dp)) {
+                        Text("01  YOUR NAME", color = Brand.Blue, fontSize = 11.sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
+                        Spacer(Modifier.height(10.dp))
+                        OutlinedTextField(
+                            value = name,
+                            onValueChange = { name = it },
+                            label = { Text("What should we call you?") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = wtFieldColors()
+                        )
+                        Spacer(Modifier.height(18.dp))
+                        Text("02  WHAT HAPPENS NEXT", color = Brand.Blue, fontSize = 11.sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
+                        Spacer(Modifier.height(10.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            StepDot("1", Brand.Blue)
+                            Spacer(Modifier.width(10.dp))
+                            Text("Start a circle or paste a friend's code.", color = Brand.Ink)
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            StepDot("2", Brand.Mint)
+                            Spacer(Modifier.width(10.dp))
+                            Text("Add shows and mark episodes as you watch.", color = Brand.Ink)
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(24.dp))
+            PunchButton(
+                text = "Enter the room",
+                enabled = name.isNotBlank() && !vm.busy,
+                onClick = {
+                    if (Build.VERSION.SDK_INT >= 33) permission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    vm.saveName(name, onDone)
+                },
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    }
+}
+
+@Composable
+private fun StepDot(number: String, color: Color) {
+    Box(
+        Modifier.size(28.dp).clip(CircleShape).background(color).border(2.dp, Brand.Stroke, CircleShape),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(number, color = Brand.OnAccent, fontSize = 12.sp, fontWeight = FontWeight.Black)
+    }
+}
+
+@Composable
+internal fun wtFieldColors() = TextFieldDefaults.colors(
+    focusedContainerColor = Brand.Surface,
+    unfocusedContainerColor = Brand.Surface,
+    disabledContainerColor = Brand.PaperDim,
+    focusedTextColor = Brand.Ink,
+    unfocusedTextColor = Brand.Ink,
+    disabledTextColor = Brand.Muted,
+    focusedIndicatorColor = Brand.Blue,
+    unfocusedIndicatorColor = Brand.Border,
+    cursorColor = Brand.Blue,
+    focusedLabelColor = Brand.Blue,
+    unfocusedLabelColor = Brand.Muted,
+    disabledLabelColor = Brand.Muted
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun GroupsScreen(vm: MainViewModel, go: (Screen) -> Unit) {
+    val uid = vm.uid!!
+    val groups by remember(uid) { vm.repo.groupsFlow(uid) }.collectAsState(emptyList())
+    var createDialog by remember { mutableStateOf(false) }
+    var groupName by remember { mutableStateOf("") }
+    val accents = listOf(Brand.Blue, Brand.Mint, Brand.Coral, Brand.Amber)
+
+    Scaffold(
+        containerColor = Brand.Paper,
+        topBar = {
+            TopAppBar(
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(12.dp).clip(CircleShape).background(Brand.Blue).border(1.dp, Brand.Stroke, CircleShape))
+                        Spacer(Modifier.width(10.dp))
+                        Text("TWINWATCH", style = MaterialTheme.typography.labelLarge, color = Brand.Ink)
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { go(Screen.Settings) }) {
+                        Icon(Icons.Default.Settings, contentDescription = "Settings", tint = Brand.Ink)
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Brand.Paper,
+                    titleContentColor = Brand.Ink
+                )
+            )
+        }
+    ) { padding ->
+        DecorBackground {
+            Column(modifier = Modifier.padding(padding).padding(20.dp).fillMaxSize()) {
+                ScreenHeader(
+                    step = "01 / YOUR CIRCLES",
+                    title = "Your circles.",
+                    subtitle = "Pick up where the group left off."
+                )
+                Spacer(Modifier.height(18.dp))
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    if (groups.isEmpty()) {
+                        item {
+                            AnimatedEnter {
+                                SoftCard(modifier = Modifier.fillMaxWidth()) {
+                                    Column(Modifier.padding(22.dp)) {
+                                        StatusPill("EMPTY ROOM", Brand.Amber)
+                                        Spacer(Modifier.height(14.dp))
+                                        Text("Nothing on the board yet.", style = MaterialTheme.typography.headlineMedium, color = Brand.Ink)
+                                        Spacer(Modifier.height(6.dp))
+                                        Text("Start a circle, then share the code with your people.", color = Brand.Muted)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    itemsIndexed(groups) { index, group ->
+                        AnimatedEnter(index * 60) {
+                            PunchCard(
+                                onClick = { go(Screen.GroupDetail(group)) },
+                                accent = accents[index % accents.size]
+                            ) {
+                                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        Modifier.size(46.dp).clip(RoundedCornerShape(14.dp))
+                                            .background(accents[index % accents.size])
+                                            .border(2.dp, Brand.Stroke, RoundedCornerShape(14.dp)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            (index + 1).toString().padStart(2, '0'),
+                                            color = Brand.OnAccent,
+                                            fontWeight = FontWeight.Black,
+                                            fontSize = 16.sp
+                                        )
+                                    }
+                                    Spacer(Modifier.width(14.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(group.name, style = MaterialTheme.typography.titleLarge, color = Brand.Ink)
+                                        Spacer(Modifier.height(7.dp))
+                                        Text(
+                                            "CODE ${group.inviteCode}  ·  ${group.memberUids.size} MEMBERS",
+                                            color = Brand.Blue,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Black,
+                                            letterSpacing = 1.sp
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(16.dp))
+                PunchButton(
+                    text = "Create a new circle",
+                    onClick = { createDialog = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) }
+                )
+                Spacer(Modifier.height(12.dp))
+                PunchButton(
+                    text = "Join with a code",
+                    onClick = { go(Screen.Join) },
+                    modifier = Modifier.fillMaxWidth(),
+                    color = Brand.Surface,
+                    contentColor = Brand.Ink,
+                    leadingIcon = { Icon(Icons.Default.GroupAdd, contentDescription = null) }
+                )
+            }
+        }
+    }
+
+    if (createDialog) {
+        AlertDialog(
+            onDismissRequest = { createDialog = false },
+            containerColor = Brand.Surface,
+            shape = RoundedCornerShape(24.dp),
+            title = { Text("New circle", color = Brand.Ink, fontWeight = FontWeight.Bold) },
+            text = {
+                OutlinedTextField(
+                    value = groupName,
+                    onValueChange = { groupName = it },
+                    label = { Text("Circle name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = wtFieldColors()
+                )
+            },
+            confirmButton = {
+                PunchButton(
+                    text = "Create",
+                    enabled = groupName.isNotBlank() && !vm.busy,
+                    modifier = Modifier.width(116.dp),
+                    onClick = {
+                        vm.createGroup(groupName.trim()) { group ->
+                            go(Screen.GroupDetail(group))
+                        }
+                        groupName = ""
+                        createDialog = false
+                    }
+                )
+            },
+            dismissButton = {
+                PunchButton("Cancel", { createDialog = false }, Modifier.width(116.dp), color = Brand.InkSoft, contentColor = Brand.Ink, borderColor = Brand.Border)
+            }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
+    var name by remember(vm.myName) { mutableStateOf(vm.myName) }
+
+    Scaffold(
+        containerColor = Brand.Paper,
+        topBar = {
+            TopAppBar(
+                title = { Text("SETTINGS", style = MaterialTheme.typography.labelLarge, color = Brand.Ink) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Brand.Ink)
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Brand.Paper)
+            )
+        }
+    ) { padding ->
+        DecorBackground {
+            Column(
+                modifier = Modifier.padding(padding).padding(20.dp).fillMaxSize()
+            ) {
+                ScreenHeader(
+                    step = "04 / PREFERENCES",
+                    title = "Make it yours.",
+                    subtitle = "Change your name or dim the whole room.",
+                    accent = Brand.Mint
+                )
+                Spacer(Modifier.height(18.dp))
+                SoftCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(20.dp)) {
+                        Text("YOUR NAME", color = Brand.Mint, fontSize = 11.sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
+                        Spacer(Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = name,
+                            onValueChange = { name = it },
+                            label = { Text("What should we call you?") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = wtFieldColors()
+                        )
+                        Spacer(Modifier.height(14.dp))
+                        PunchButton(
+                            text = "Save name",
+                            onClick = { vm.saveName(name.trim()) { } },
+                            enabled = name.isNotBlank() && name.trim() != vm.myName && !vm.busy,
+                            modifier = Modifier.fillMaxWidth(),
+                            color = Brand.Mint,
+                            contentColor = Brand.OnAccent
+                        )
+                    }
+                }
+                Spacer(Modifier.height(14.dp))
+                SoftCard(modifier = Modifier.fillMaxWidth()) {
+                    Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("DARK MODE", color = Brand.Blue, fontSize = 11.sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
+                            Spacer(Modifier.height(6.dp))
+                            Text("Easier on the eyes when the lights are low.", color = Brand.Muted, fontSize = 13.sp)
+                        }
+                        Switch(
+                            checked = vm.darkTheme,
+                            onCheckedChange = { vm.setDarkMode(it) }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun JoinScreen(vm: MainViewModel, replace: (Screen) -> Unit, back: () -> Unit) {
+    var code by remember { mutableStateOf(vm.pendingJoinCode ?: "") }
+
+    LaunchedEffect(vm.pendingJoinCode) {
+        vm.pendingJoinCode?.let { pending ->
+            code = pending
+            vm.joinGroup(pending) { group ->
+                if (group != null) replace(Screen.GroupDetail(group))
+            }
+        }
+    }
+
+    Scaffold(
+        containerColor = Brand.Paper,
+        topBar = {
+            TopAppBar(
+                title = { Text("JOIN A CIRCLE", style = MaterialTheme.typography.labelLarge, color = Brand.Ink) },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Brand.Paper)
+            )
+        }
+    ) { padding ->
+        DecorBackground {
+            Column(modifier = Modifier.padding(padding).padding(24.dp).fillMaxSize()) {
+                ScreenHeader(
+                    step = "02 / JOIN CIRCLE",
+                    title = "Got a code?",
+                    subtitle = "Six characters is all you need. Paste the full invite link and we'll read the code for you.",
+                    accent = Brand.Mint
+                )
+                Spacer(Modifier.height(28.dp))
+                SoftCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(20.dp)) {
+                        Text("GROUP CODE", color = Brand.Mint, fontSize = 11.sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
+                        Spacer(Modifier.height(10.dp))
+                        OutlinedTextField(
+                            value = code,
+                            onValueChange = { code = extractInviteCode(it) },
+                            label = { Text("Code or invite link") },
+                            singleLine = true,
+                            textStyle = TextStyle(
+                                fontSize = 28.sp,
+                                fontWeight = FontWeight.Black,
+                                letterSpacing = 6.sp,
+                                color = Brand.Ink
+                            ),
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = wtFieldColors()
+                        )
+                    }
+                }
+                Spacer(Modifier.height(24.dp))
+                PunchButton(
+                    text = "Join the circle",
+                    enabled = code.length >= 4 && !vm.busy,
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = {
+                        vm.joinGroup(code) { group ->
+                            if (group != null) replace(Screen.GroupDetail(group))
+                        }
+                    }
+                )
+                Spacer(Modifier.height(12.dp))
+                PunchButton(
+                    text = "Back",
+                    onClick = back,
+                    modifier = Modifier.fillMaxWidth(),
+                    color = Brand.Surface,
+                    contentColor = Brand.Ink
+                )
+            }
+        }
+    }
+}
+
+
+
+================================================
+FILE: app/src/main/java/com/dionlobo/watchtogether/Design.kt
+================================================
+package com.dionlobo.watchtogether
+
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.Typography
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.LineHeightStyle
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+
+internal data class WatchPalette(
+    val ink: Color,
+    val inkSoft: Color,
+    val paper: Color,
+    val paperDim: Color,
+    val blue: Color,
+    val amber: Color,
+    val mint: Color,
+    val coral: Color,
+    val muted: Color,
+    val border: Color,
+    val surface: Color,
+    val onPrimary: Color,
+    val onAccent: Color,
+    val stroke: Color,
+    val shadow: Color,
+    val inverseSurface: Color,
+    val inverseOnSurface: Color,
+    val skeleton: Color,
+    val imageScrim: Color
+)
+
+private val LightWatchPalette = WatchPalette(
+    ink = Color(0xFF17202A),
+    inkSoft = Color(0xFFEFF1EC),
+    paper = Color(0xFFF8F7F2),
+    paperDim = Color(0xFFDDE1DB),
+    blue = Color(0xFF2563EB),
+    amber = Color(0xFFF5C518),
+    mint = Color(0xFF00A88E),
+    coral = Color(0xFFFF6B57),
+    muted = Color(0xFF5F6B7A),
+    border = Color(0xFFD6DBE2),
+    surface = Color(0xFFFFFFFF),
+    onPrimary = Color(0xFFFFFFFF),
+    onAccent = Color(0xFF17202A),
+    stroke = Color(0xFF17202A),
+    shadow = Color(0x3817202A),
+    inverseSurface = Color(0xFF17202A),
+    inverseOnSurface = Color(0xFFFFFFFF),
+    skeleton = Color(0xFF17202A),
+    imageScrim = Color.Transparent
+)
+
+private val DarkWatchPalette = WatchPalette(
+    ink = Color(0xFFF3F6FA),
+    inkSoft = Color(0xFF22303F),
+    paper = Color(0xFF0F151C),
+    paperDim = Color(0xFF2B3949),
+    blue = Color(0xFF7AA2FF),
+    amber = Color(0xFFFFD45C),
+    mint = Color(0xFF4DD9C0),
+    coral = Color(0xFFFF8C7A),
+    muted = Color(0xFFA9B6C7),
+    border = Color(0xFF3A4858),
+    surface = Color(0xFF1B2531),
+    onPrimary = Color(0xFF0B1118),
+    onAccent = Color(0xFF0B1118),
+    stroke = Color(0xFF0A0F15),
+    shadow = Color(0x99000000),
+    inverseSurface = Color(0xFFE8EDF4),
+    inverseOnSurface = Color(0xFF111922),
+    skeleton = Color(0xFF6B7B8F),
+    imageScrim = Color(0x33000000)
+)
+
+internal val LocalWatchPalette = compositionLocalOf { LightWatchPalette }
+
+object Brand {
+    @get:Composable val Ink: Color get() = LocalWatchPalette.current.ink
+    @get:Composable val InkSoft: Color get() = LocalWatchPalette.current.inkSoft
+    @get:Composable val Paper: Color get() = LocalWatchPalette.current.paper
+    @get:Composable val PaperDim: Color get() = LocalWatchPalette.current.paperDim
+    @get:Composable val Blue: Color get() = LocalWatchPalette.current.blue
+    @get:Composable val Amber: Color get() = LocalWatchPalette.current.amber
+    @get:Composable val Mint: Color get() = LocalWatchPalette.current.mint
+    @get:Composable val Coral: Color get() = LocalWatchPalette.current.coral
+    @get:Composable val Muted: Color get() = LocalWatchPalette.current.muted
+    @get:Composable val Border: Color get() = LocalWatchPalette.current.border
+    @get:Composable val Surface: Color get() = LocalWatchPalette.current.surface
+    @get:Composable val OnPrimary: Color get() = LocalWatchPalette.current.onPrimary
+    @get:Composable val OnAccent: Color get() = LocalWatchPalette.current.onAccent
+    @get:Composable val Stroke: Color get() = LocalWatchPalette.current.stroke
+    @get:Composable val Shadow: Color get() = LocalWatchPalette.current.shadow
+    @get:Composable val InverseSurface: Color get() = LocalWatchPalette.current.inverseSurface
+    @get:Composable val InverseOnSurface: Color get() = LocalWatchPalette.current.inverseOnSurface
+    @get:Composable val Skeleton: Color get() = LocalWatchPalette.current.skeleton
+    @get:Composable val ImageScrim: Color get() = LocalWatchPalette.current.imageScrim
+}
+
+@Composable
+fun AppTheme(darkTheme: Boolean = false, content: @Composable () -> Unit) {
+    val palette = if (darkTheme) DarkWatchPalette else LightWatchPalette
+    val colors = if (darkTheme) {
+        darkColorScheme(
+            primary = palette.blue,
+            onPrimary = palette.onPrimary,
+            primaryContainer = palette.blue.copy(alpha = 0.22f),
+            onPrimaryContainer = palette.ink,
+            secondary = palette.mint,
+            onSecondary = palette.onAccent,
+            secondaryContainer = palette.mint.copy(alpha = 0.2f),
+            onSecondaryContainer = palette.ink,
+            tertiary = palette.coral,
+            onTertiary = palette.onAccent,
+            background = palette.paper,
+            onBackground = palette.ink,
+            surface = palette.surface,
+            onSurface = palette.ink,
+            surfaceVariant = palette.inkSoft,
+            onSurfaceVariant = palette.muted,
+            outline = palette.border
+        )
+    } else {
+        lightColorScheme(
+            primary = palette.blue,
+            onPrimary = palette.onPrimary,
+            primaryContainer = palette.blue.copy(alpha = 0.12f),
+            onPrimaryContainer = palette.ink,
+            secondary = palette.mint,
+            onSecondary = palette.onAccent,
+            secondaryContainer = palette.mint.copy(alpha = 0.14f),
+            onSecondaryContainer = palette.ink,
+            tertiary = palette.coral,
+            onTertiary = palette.onAccent,
+            background = palette.paper,
+            onBackground = palette.ink,
+            surface = palette.surface,
+            onSurface = palette.ink,
+            surfaceVariant = palette.inkSoft,
+            onSurfaceVariant = palette.muted,
+            outline = palette.border
+        )
+    }
+    val typography = Typography(
+        displayLarge = TextStyle(fontSize = 44.sp, fontWeight = FontWeight.Black, letterSpacing = (-1.8).sp),
+        headlineLarge = TextStyle(fontSize = 32.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.8).sp),
+        headlineMedium = TextStyle(fontSize = 24.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.4).sp),
+        titleLarge = TextStyle(fontSize = 19.sp, fontWeight = FontWeight.Bold),
+        bodyLarge = TextStyle(
+            fontSize = 16.sp,
+            lineHeight = 23.sp,
+            lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.None)
+        ),
+        labelLarge = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.Bold)
+    )
+    val shapes = Shapes(
+        extraSmall = RoundedCornerShape(8.dp),
+        small = RoundedCornerShape(12.dp),
+        medium = RoundedCornerShape(20.dp),
+        large = RoundedCornerShape(28.dp),
+        extraLarge = RoundedCornerShape(36.dp)
+    )
+    CompositionLocalProvider(LocalWatchPalette provides palette) {
+        MaterialTheme(colorScheme = colors, typography = typography, shapes = shapes, content = content)
+    }
+}
+
+@Composable
+private fun pressScale(pressed: Boolean, enabled: Boolean): Modifier {
+    val scale by animateFloatAsState(
+        targetValue = if (pressed && enabled) 0.965f else 1f,
+        animationSpec = spring(dampingRatio = 0.62f, stiffness = 560f),
+        label = "pressScale"
+    )
+    return Modifier.graphicsLayer { scaleX = scale; scaleY = scale }
+}
+
+@Composable
+fun PunchButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    color: Color = Color.Unspecified,
+    contentColor: Color = Color.Unspecified,
+    borderColor: Color = Color.Unspecified,
+    enabled: Boolean = true,
+    haptic: Boolean = true,
+    leadingIcon: (@Composable () -> Unit)? = null
+) {
+    val palette = LocalWatchPalette.current
+    val resolvedColor = if (color == Color.Unspecified) palette.blue else color
+    val resolvedContentColor = if (contentColor == Color.Unspecified) palette.onPrimary else contentColor
+    val resolvedBorderColor = if (borderColor == Color.Unspecified) palette.stroke else borderColor
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val feedback = LocalHapticFeedback.current
+    val radius by animateDpAsState(
+        if (pressed && enabled) 26.dp else 18.dp,
+        spring(dampingRatio = 0.7f, stiffness = 520f),
+        label = "buttonShape"
+    )
+    val shift by animateDpAsState(
+        if (pressed && enabled) 4.dp else 0.dp,
+        spring(dampingRatio = 0.7f, stiffness = 520f),
+        label = "buttonShift"
+    )
+    val shadowShift by animateDpAsState(
+        if (pressed && enabled) 0.dp else 5.dp,
+        spring(dampingRatio = 0.7f, stiffness = 520f),
+        label = "buttonShadow"
+    )
+    Box(modifier.height(56.dp).then(pressScale(pressed, enabled))) {
+        Box(
+            Modifier
+                .matchParentSize()
+                .offset(y = shadowShift)
+                .clip(RoundedCornerShape(radius))
+                .background(palette.shadow.copy(alpha = if (enabled) 1f else 0.4f))
+        )
+        Surface(
+            shape = RoundedCornerShape(radius),
+            color = if (enabled) resolvedColor else palette.paperDim,
+            contentColor = if (enabled) resolvedContentColor else palette.muted,
+            border = BorderStroke(2.dp, if (enabled) resolvedBorderColor else palette.border),
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight()
+                .offset(y = shift)
+                .clip(RoundedCornerShape(radius))
+                .clickable(
+                    interactionSource = interaction,
+                    indication = LocalIndication.current,
+                    enabled = enabled
+                ) {
+                    if (haptic) feedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onClick()
+                }
+        ) {
+            Row(
+                Modifier.padding(horizontal = 18.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.Center
+            ) {
+                if (leadingIcon != null) {
+                    leadingIcon()
+                    Spacer(Modifier.width(10.dp))
+                }
+                Text(
+                    text,
+                    style = MaterialTheme.typography.labelLarge,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun PunchIconButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    color: Color = Color.Unspecified,
+    contentColor: Color = Color.Unspecified,
+    enabled: Boolean = true,
+    content: @Composable () -> Unit
+) {
+    val palette = LocalWatchPalette.current
+    val resolvedColor = if (color == Color.Unspecified) palette.surface else color
+    val resolvedContentColor = if (contentColor == Color.Unspecified) palette.ink else contentColor
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val radius by animateDpAsState(
+        if (pressed && enabled) 20.dp else 15.dp,
+        spring(dampingRatio = 0.7f, stiffness = 520f),
+        label = "iconShape"
+    )
+    val shift by animateDpAsState(
+        if (pressed && enabled) 3.dp else 0.dp,
+        spring(dampingRatio = 0.7f, stiffness = 520f),
+        label = "iconShift"
+    )
+    Box(Modifier.size(48.dp).then(modifier).then(pressScale(pressed, enabled))) {
+        Box(
+            Modifier
+                .matchParentSize()
+                .offset(y = if (pressed) 0.dp else 4.dp)
+                .clip(RoundedCornerShape(radius))
+                .background(palette.shadow)
+        )
+        Surface(
+            shape = RoundedCornerShape(radius),
+            color = resolvedColor,
+            contentColor = resolvedContentColor,
+            border = BorderStroke(2.dp, palette.stroke),
+            modifier = Modifier
+                .fillMaxSize()
+                .offset(y = shift)
+                .clip(RoundedCornerShape(radius))
+                .clickable(interactionSource = interaction, indication = LocalIndication.current, enabled = enabled, onClick = onClick)
+        ) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { content() }
+        }
+    }
+}
+
+@Composable
+fun PunchCard(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    color: Color = Color.Unspecified,
+    accent: Color = Color.Unspecified,
+    content: @Composable () -> Unit
+) {
+    val palette = LocalWatchPalette.current
+    val resolvedColor = if (color == Color.Unspecified) palette.surface else color
+    val resolvedAccent = if (accent == Color.Unspecified) palette.blue else accent
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val shift by animateDpAsState(if (pressed) 3.dp else 0.dp, spring(dampingRatio = 0.7f, stiffness = 520f), label = "cardShift")
+    val radius by animateDpAsState(if (pressed) 26.dp else 20.dp, spring(dampingRatio = 0.7f, stiffness = 520f), label = "cardShape")
+    Box(modifier.then(pressScale(pressed, true))) {
+        Box(
+            Modifier
+                .matchParentSize()
+                .offset(y = if (pressed) 0.dp else 5.dp)
+                .clip(RoundedCornerShape(radius))
+                .background(palette.shadow)
+        )
+        Surface(
+            shape = RoundedCornerShape(radius),
+            color = resolvedColor,
+            border = BorderStroke(2.dp, palette.stroke),
+            modifier = Modifier
+                .fillMaxWidth()
+                .offset(y = shift)
+                .clip(RoundedCornerShape(radius))
+                .clickable(interactionSource = interaction, indication = LocalIndication.current, onClick = onClick)
+        ) {
+            Box {
+                Box(Modifier.fillMaxWidth().height(4.dp).background(resolvedAccent))
+                content()
+            }
+        }
+    }
+}
+
+@Composable
+fun SoftCard(
+    modifier: Modifier = Modifier,
+    color: Color = Color.Unspecified,
+    content: @Composable () -> Unit
+) {
+    val palette = LocalWatchPalette.current
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(20.dp),
+        color = if (color == Color.Unspecified) palette.surface else color,
+        border = BorderStroke(1.dp, palette.border),
+        shadowElevation = 2.dp
+    ) {
+        content()
+    }
+}
+
+@Composable
+fun ScreenHeader(step: String, title: String, subtitle: String, accent: Color = Color.Unspecified) {
+    Column {
+        Eyebrow(step, accent)
+        Spacer(Modifier.height(10.dp))
+        Text(title, style = MaterialTheme.typography.displayLarge, color = Brand.Ink)
+        Spacer(Modifier.height(6.dp))
+        Text(subtitle, color = Brand.Muted, fontSize = 15.sp)
+        Spacer(Modifier.height(12.dp))
+        AccentDivider(accent)
+    }
+}
+
+@Composable
+fun AnimatedEnter(delayMs: Int = 0, content: @Composable () -> Unit) {
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { visible = true }
+    val alpha by animateFloatAsState(if (visible) 1f else 0f, tween(360, delayMs), label = "enterAlpha")
+    val offset by animateFloatAsState(if (visible) 0f else 18f, tween(420, delayMs), label = "enterOffset")
+    Box(Modifier.alpha(alpha).offset(y = offset.dp)) { content() }
+}
+
+@Composable
+fun ProgressRing(progress: Float, diameter: Dp = 72.dp) {
+    val animated by animateFloatAsState(progress.coerceIn(0f, 1f), spring(dampingRatio = 0.7f, stiffness = 160f), label = "progress")
+    val track = Brand.PaperDim
+    val fill = Brush.sweepGradient(listOf(Brand.Blue, Brand.Mint, Brand.Amber, Brand.Blue))
+    Box(Modifier.size(diameter), contentAlignment = Alignment.Center) {
+        Canvas(Modifier.fillMaxSize()) {
+            val stroke = 8.dp.toPx()
+            val inset = stroke / 2
+            val arcSize = Size(this.size.width - stroke, this.size.height - stroke)
+            drawArc(track, 0f, 360f, false, Offset(inset, inset), arcSize, style = Stroke(stroke))
+            drawArc(fill, -90f, 360f * animated, false, Offset(inset, inset), arcSize, style = Stroke(stroke, cap = StrokeCap.Round))
+        }
+        Text("${(animated * 100).toInt()}%", style = MaterialTheme.typography.labelLarge, color = Brand.Ink)
+    }
+}
+
+@Composable
+fun Avatar(initials: String, color: Color, size: Dp = 38.dp) {
+    Box(
+        Modifier.size(size).clip(CircleShape).background(color).border(2.dp, Brand.Stroke, CircleShape),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(initials, color = Brand.OnAccent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+fun AccentDivider(accent: Color = Color.Unspecified) {
+    val palette = LocalWatchPalette.current
+    val resolved = if (accent == Color.Unspecified) palette.blue else accent
+    Box(
+        Modifier.padding(vertical = 4.dp).size(height = 4.dp, width = 52.dp)
+            .clip(CircleShape).background(Brush.horizontalGradient(listOf(resolved, palette.coral)))
+    )
+}
+
+@Composable
+fun DecorBackground(content: @Composable () -> Unit) {
+    val palette = LocalWatchPalette.current
+    Box(Modifier.fillMaxSize().background(palette.paper)) {
+        Canvas(Modifier.fillMaxSize()) {
+            val blue = palette.blue.copy(alpha = 0.07f)
+            val amber = palette.amber.copy(alpha = 0.10f)
+            val grid = palette.border.copy(alpha = 0.35f)
+            drawCircle(blue, radius = size.minDimension * 0.42f, center = Offset(size.width, 0f))
+            drawCircle(amber, radius = size.minDimension * 0.34f, center = Offset(0f, size.height))
+            val step = 56.dp.toPx()
+            var x = step
+            while (x < size.width) {
+                drawLine(grid, Offset(x, 0f), Offset(x, size.height), 1f)
+                x += step
+            }
+            var y = step
+            while (y < size.height) {
+                drawLine(grid, Offset(0f, y), Offset(size.width, y), 1f)
+                y += step
+            }
+        }
+        content()
+    }
+}
+
+@Composable
+fun Eyebrow(text: String, accent: Color = Color.Unspecified) {
+    val palette = LocalWatchPalette.current
+    val resolved = if (accent == Color.Unspecified) palette.blue else accent
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(9.dp).clip(CircleShape).background(resolved).border(1.dp, palette.stroke, CircleShape))
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text.uppercase(),
+            color = resolved,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Black,
+            letterSpacing = 2.sp
+        )
+    }
+}
+
+@Composable
+fun StatusPill(text: String, color: Color) {
+    Surface(
+        shape = RoundedCornerShape(999.dp),
+        color = color.copy(alpha = 0.16f),
+        border = BorderStroke(1.dp, color)
+    ) {
+        Text(
+            text.uppercase(),
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+            color = Brand.Ink,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Black,
+            letterSpacing = 1.sp
+        )
+    }
+}
+
+@Composable
+fun PunchTabs(tabs: List<String>, selected: Int, onSelect: (Int) -> Unit) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+        tabs.forEachIndexed { index, label ->
+            val palette = LocalWatchPalette.current
+            val isSelected = selected == index
+            val background by animateColorAsState(
+                if (isSelected) palette.inverseSurface else palette.surface,
+                spring(dampingRatio = 0.7f, stiffness = 420f),
+                label = "tabBackground"
+            )
+            val foreground by animateColorAsState(
+                if (isSelected) palette.inverseOnSurface else palette.ink,
+                spring(dampingRatio = 0.7f, stiffness = 420f),
+                label = "tabForeground"
+            )
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = background,
+                contentColor = foreground,
+                border = BorderStroke(2.dp, palette.stroke),
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable { onSelect(index) }
+            ) {
+                Text(
+                    label.uppercase(),
+                    modifier = Modifier.padding(vertical = 11.dp),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 1.sp
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun ShimmerBar(width: Dp, height: Dp = 12.dp) {
+    val transition = rememberInfiniteTransition(label = "shimmer")
+    val alpha by transition.animateFloat(
+        initialValue = 0.10f,
+        targetValue = 0.28f,
+        animationSpec = infiniteRepeatable(tween(850), RepeatMode.Reverse),
+        label = "shimmerAlpha"
+    )
+    Box(
+        Modifier.size(width, height).clip(RoundedCornerShape(height / 2))
+            .background(Brand.Skeleton.copy(alpha = alpha))
+    )
+}
+
+@Composable
+fun ShowSkeletonRow() {
+    Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+        ShimmerBar(52.dp, 74.dp)
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            ShimmerBar(150.dp, 14.dp)
+            Spacer(Modifier.height(8.dp))
+            ShimmerBar(90.dp, 10.dp)
+        }
+    }
+}
+
+
+
+================================================
+FILE: app/src/main/java/com/dionlobo/watchtogether/MainViewModel.kt
+================================================
+package com.dionlobo.watchtogether
+
+import android.app.Application
+import android.content.Context
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
+
+internal fun Throwable.isCancellation(): Boolean {
+    var cause: Throwable? = this
+    while (cause != null) {
+        if (cause is CancellationException) return true
+        cause = cause.cause
+    }
+    return false
+}
+
+class MainViewModel(app: Application) : AndroidViewModel(app) {
+    val repo = Repository()
+    private val prefs = app.getSharedPreferences("watch_together_prefs", Context.MODE_PRIVATE)
+
+    var ready by mutableStateOf(false)
+        private set
+    var uid by mutableStateOf<String?>(null)
+        private set
+    var myName by mutableStateOf("")
+        private set
+    var busy by mutableStateOf(false)
+        private set
+    var message by mutableStateOf<String?>(null)
+    var pendingJoinCode by mutableStateOf<String?>(null)
+        private set
+    var darkTheme by mutableStateOf(prefs.getBoolean("dark_theme", false))
+        private set
+
+    init {
+        viewModelScope.launch {
+            try {
+                val id = repo.ensureSignedIn()
+                val name = repo.profile(id)?.name ?: ""
+                uid = id
+                myName = name
+                ready = true
+                startActivityWatcher(id)
+                ReminderScheduler.schedule(getApplication())
+            } catch (e: Exception) {
+                if (!e.isCancellation()) message = e.localizedMessage ?: "Could not sign in"
+            }
+        }
+    }
+
+    private fun startActivityWatcher(uid: String) {
+        viewModelScope.launch {
+            repo.activityEventsFlow(uid).collect { (groupId, event) ->
+                if (event.uid != uid && event.body.isNotBlank()) {
+                    showActivityNotification(getApplication(), event.body, groupId)
+                }
+            }
+        }
+    }
+
+    fun submitJoinCode(code: String?) {
+        pendingJoinCode = code
+    }
+
+    fun saveName(name: String, onDone: () -> Unit) {
+        viewModelScope.launch {
+            busy = true
+            try {
+                val id = uid ?: repo.ensureSignedIn()
+                uid = id
+                repo.updateName(id, name.trim())
+                myName = name.trim()
+                onDone()
+            } catch (e: Exception) {
+                if (!e.isCancellation()) message = e.localizedMessage ?: "Could not save name"
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    fun setDarkMode(enabled: Boolean) {
+        darkTheme = enabled
+        prefs.edit().putBoolean("dark_theme", enabled).apply()
+    }
+
+    fun createGroup(name: String, onDone: (Group) -> Unit) {
+        viewModelScope.launch {
+            busy = true
+            try {
+                val id = uid ?: repo.ensureSignedIn()
+                val group = repo.createGroup(name, id, myName)
+                onDone(group)
+            } catch (e: Exception) {
+                if (!e.isCancellation()) message = e.localizedMessage ?: "Could not create group"
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    fun joinGroup(code: String, onDone: (Group?) -> Unit) {
+        viewModelScope.launch {
+            busy = true
+            try {
+                val id = uid ?: repo.ensureSignedIn()
+                val group = repo.joinGroup(code, id, myName)
+                if (group != null) pendingJoinCode = null
+                onDone(group)
+            } catch (e: Exception) {
+                if (!e.isCancellation()) message = e.localizedMessage ?: "Could not join group"
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    fun launchApp(block: suspend () -> Unit) = viewModelScope.launch {
+        try {
+            block()
+        } catch (e: Exception) {
+            if (!e.isCancellation()) message = e.localizedMessage ?: "Something went wrong"
+        }
+    }
+
+    fun clearMessage() {
+        message = null
+    }
+}
+
+
+
+================================================
+FILE: app/src/main/java/com/dionlobo/watchtogether/Model.kt
+================================================
+package com.dionlobo.watchtogether
+
+import com.google.firebase.firestore.DocumentSnapshot
+
+data class UserProfile(
+    val uid: String = "",
+    val name: String = ""
+)
+
+data class Group(
+    val id: String = "",
+    val name: String = "",
+    val inviteCode: String = "",
+    val createdBy: String = "",
+    val createdAt: Long = 0L,
+    val memberUids: List<String> = emptyList()
+)
+
+data class Member(
+    val uid: String = "",
+    val name: String = "",
+    val joinedAt: Long = 0L
+)
+
+data class ShowEntry(
+    val id: String = "",
+    val name: String = "",
+    val imageUrl: String = "",
+    val addedBy: String = "",
+    val addedAt: Long = 0L
+)
+
+data class TvEpisode(
+    val id: Int = 0,
+    val name: String = "",
+    val season: Int = 0,
+    val number: Int = 0,
+    val airdate: String = "",
+    val imageUrl: String = ""
+)
+
+data class WatchedEpisode(
+    val id: String = "",
+    val season: Int = 0,
+    val number: Int = 0,
+    val name: String = "",
+    val showId: String = "",
+    val markedAt: Long = 0L
+)
+
+data class Note(
+    val id: String = "",
+    val uid: String = "",
+    val authorName: String = "",
+    val scope: String = "show",
+    val showId: String = "",
+    val season: Int = 0,
+    val episode: Int = 0,
+    val text: String = "",
+    val isPublic: Boolean = true,
+    val createdAt: Long = 0L
+)
+
+data class GroupEvent(
+    val id: String = "",
+    val uid: String = "",
+    val authorName: String = "",
+    val body: String = "",
+    val createdAt: Long = 0L,
+    val showId: String = ""
+)
+
+private fun DocumentSnapshot.str(key: String): String = (get(key) as? String) ?: ""
+private fun DocumentSnapshot.long(key: String): Long = (get(key) as? Number)?.toLong() ?: 0L
+private fun DocumentSnapshot.int(key: String): Int = (get(key) as? Number)?.toInt() ?: 0
+private fun DocumentSnapshot.bool(key: String): Boolean = (get(key) as? Boolean) ?: false
+
+fun DocumentSnapshot.toUserProfile(): UserProfile = UserProfile(id, str("name"))
+
+fun DocumentSnapshot.toGroup(): Group = Group(
+    id = id,
+    name = str("name"),
+    inviteCode = str("inviteCode"),
+    createdBy = str("createdBy"),
+    createdAt = long("createdAt"),
+    memberUids = (get("memberUids") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
+)
+
+fun DocumentSnapshot.toMember(): Member = Member(
+    uid = id,
+    name = str("name"),
+    joinedAt = long("joinedAt")
+)
+
+fun DocumentSnapshot.toShowEntry(): ShowEntry = ShowEntry(
+    id = id,
+    name = str("name"),
+    imageUrl = str("imageUrl"),
+    addedBy = str("addedBy"),
+    addedAt = long("addedAt")
+)
+
+fun DocumentSnapshot.toWatchedEpisode(): WatchedEpisode = WatchedEpisode(
+    id = id,
+    season = int("season"),
+    number = int("number"),
+    name = str("name"),
+    showId = str("showId"),
+    markedAt = long("markedAt")
+)
+
+fun DocumentSnapshot.toNote(): Note = Note(
+    id = id,
+    uid = str("uid"),
+    authorName = str("authorName"),
+    scope = str("scope"),
+    showId = str("showId"),
+    season = int("season"),
+    episode = int("episode"),
+    text = str("text"),
+    isPublic = bool("isPublic"),
+    createdAt = long("createdAt")
+)
+
+fun DocumentSnapshot.toGroupEvent(): GroupEvent = GroupEvent(
+    id = id,
+    uid = str("uid"),
+    authorName = str("authorName"),
+    body = str("body"),
+    createdAt = long("createdAt"),
+    showId = str("showId")
+)
+
+
+
+================================================
+FILE: app/src/main/java/com/dionlobo/watchtogether/Notifications.kt
+================================================
+package com.dionlobo.watchtogether
+
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Context
+import android.content.Intent
+import android.os.Build
+import androidx.core.app.NotificationCompat
+import com.google.firebase.messaging.FirebaseMessagingService
+import com.google.firebase.messaging.RemoteMessage
+
+private const val CHANNEL_ID = "watch_together_activity"
+
+class WatchMessagingService : FirebaseMessagingService() {
+    override fun onMessageReceived(message: RemoteMessage) {
+        val author = message.data["authorUid"] ?: message.data["uid"] ?: ""
+        if (author.isNotEmpty() && author == Repository().currentUid()) return
+
+        val body = message.data["body"]
+            ?: message.notification?.body
+            ?: "Something new happened in your group"
+        showActivityNotification(this, body, message.data["groupId"] ?: "")
+    }
+}
+
+fun showActivityNotification(context: Context, body: String, groupId: String) {
+    val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            "Group activity",
+            NotificationManager.IMPORTANCE_HIGH
+        ).apply { description = "Episodes and notes from your groups" }
+        manager.createNotificationChannel(channel)
+    }
+
+    val intent = Intent(context, MainActivity::class.java).apply {
+        flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        if (groupId.isNotEmpty()) putExtra("groupId", groupId)
+    }
+    val pendingIntent = PendingIntent.getActivity(
+        context,
+        groupId.hashCode(),
+        intent,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    )
+
+    val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+        .setSmallIcon(R.drawable.ic_launcher_foreground)
+        .setContentTitle("TwinWatch")
+        .setContentText(body)
+        .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+        .setAutoCancel(true)
+        .setPriority(NotificationCompat.PRIORITY_HIGH)
+        .setContentIntent(pendingIntent)
+        .build()
+
+    manager.notify((groupId + body).hashCode(), notification)
+}
+
+
+
+================================================
+FILE: app/src/main/java/com/dionlobo/watchtogether/Reminders.kt
+================================================
+package com.dionlobo.watchtogether
+
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Context
+import android.content.Intent
+import android.os.Build
+import androidx.core.app.NotificationCompat
+import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
+import androidx.work.Worker
+import androidx.work.WorkerParameters
+import androidx.work.workDataOf
+import java.util.Calendar
+import java.util.concurrent.TimeUnit
+
+object ReminderScheduler {
+    private const val CHANNEL_ID = "watch_together_reminders"
+    private const val KEY_SLOT = "slot"
+    private const val KEY_TITLE = "title"
+    private const val KEY_BODY = "body"
+
+    fun schedule(context: Context) {
+        scheduleSlot(context, "midday", 13, 0, "Watch check-in", "Did you watch anything today? Tap to log it.")
+        scheduleSlot(context, "evening", 21, 0, "Tonight's recap", "Log the episodes you finished tonight.")
+    }
+
+    fun scheduleSlot(context: Context, slot: String, hour: Int, minute: Int, title: String, body: String) {
+        val work = OneTimeWorkRequestBuilder<ReminderWorker>()
+            .setInitialDelay(millisUntil(hour, minute), TimeUnit.MILLISECONDS)
+            .setInputData(
+                workDataOf(
+                    KEY_SLOT to slot,
+                    KEY_TITLE to title,
+                    KEY_BODY to body
+                )
+            )
+            .build()
+        WorkManager.getInstance(context)
+            .enqueueUniqueWork("watch_reminder_$slot", ExistingWorkPolicy.REPLACE, work)
+    }
+
+    private fun millisUntil(hour: Int, minute: Int): Long {
+        val now = Calendar.getInstance()
+        val due = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, hour)
+            set(Calendar.MINUTE, minute)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        if (due.timeInMillis <= now.timeInMillis) due.add(Calendar.DATE, 1)
+        return due.timeInMillis - now.timeInMillis
+    }
+
+    fun createChannel(context: Context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val manager = context.getSystemService(NotificationManager::class.java) ?: return
+        if (manager.getNotificationChannel(CHANNEL_ID) != null) return
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            "Watch reminders",
+            NotificationManager.IMPORTANCE_DEFAULT
+        )
+        channel.description = "Daily prompts to log watched episodes"
+        manager.createNotificationChannel(channel)
+    }
+
+    fun show(context: Context, slot: String, title: String, body: String) {
+        createChannel(context)
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("openLog", true)
+        }
+        val flags = PendingIntent.FLAG_UPDATE_CURRENT or
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
+        val pending = PendingIntent.getActivity(context, slot.hashCode(), intent, flags)
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setContentIntent(pending)
+            .setAutoCancel(true)
+            .build()
+        val manager = context.getSystemService(NotificationManager::class.java) ?: return
+        manager.notify(slot.hashCode(), notification)
+    }
+}
+
+class ReminderWorker(context: Context, params: WorkerParameters) : Worker(context, params) {
+    override fun doWork(): Result {
+        val slot = inputData.getString("slot") ?: "midday"
+        val title = inputData.getString("title") ?: "Watch check-in"
+        val body = inputData.getString("body") ?: "Did you watch anything today? Tap to log it."
+        ReminderScheduler.show(applicationContext, slot, title, body)
+        val hour = if (slot == "evening") 21 else 13
+        val minute = 0
+        ReminderScheduler.scheduleSlot(applicationContext, slot, hour, minute, title, body)
+        return Result.success()
+    }
+}
+
+
+
+================================================
+FILE: app/src/main/java/com/dionlobo/watchtogether/Repository.kt
+================================================
+package com.dionlobo.watchtogether
+
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.CollectionReference
+import com.google.firebase.firestore.FieldValue
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.Query
+import com.google.firebase.messaging.FirebaseMessaging
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.tasks.await
+import kotlin.random.Random
+
+class Repository {
+    private val auth = FirebaseAuth.getInstance()
+    private val db = FirebaseFirestore.getInstance()
+    private val messaging = FirebaseMessaging.getInstance()
+
+    fun currentUid(): String? = auth.currentUser?.uid
+
+    suspend fun ensureSignedIn(): String {
+        auth.currentUser?.let { return it.uid }
+        return auth.signInAnonymously().await().user!!.uid
+    }
+
+    suspend fun saveProfile(uid: String, name: String) {
+        db.collection("users").document(uid)
+            .set(mapOf("name" to name, "createdAt" to FieldValue.serverTimestamp()))
+            .await()
+    }
+
+    suspend fun profile(uid: String): UserProfile? {
+        val snap = db.collection("users").document(uid).get().await()
+        return if (snap.exists()) snap.toUserProfile() else null
+    }
+
+    suspend fun updateName(uid: String, name: String) {
+        val clean = name.trim()
+        val groups = db.collection("groups").whereArrayContains("memberUids", uid).get().await()
+        db.runBatch { batch ->
+            batch.set(
+                db.collection("users").document(uid),
+                mapOf("name" to clean, "createdAt" to FieldValue.serverTimestamp())
+            )
+            groups.documents.forEach { group ->
+                batch.update(
+                    group.reference.collection("members").document(uid),
+                    mapOf("name" to clean)
+                )
+            }
+        }.await()
+    }
+
+    fun groupsFlow(uid: String): Flow<List<Group>> = callbackFlow {
+        val listener = db.collection("groups").whereArrayContains("memberUids", uid)
+            .addSnapshotListener { snap, error ->
+                if (error != null || snap == null) return@addSnapshotListener
+                trySend(snap.documents.map { it.toGroup() }.sortedBy { it.name })
+            }
+        awaitClose { listener.remove() }
+    }
+
+    fun membersFlow(groupId: String): Flow<List<Member>> = callbackFlow {
+        val listener = db.collection("groups").document(groupId).collection("members")
+            .addSnapshotListener { snap, error ->
+                if (error != null || snap == null) return@addSnapshotListener
+                trySend(snap.documents.map { it.toMember() }.sortedBy { it.name })
+            }
+        awaitClose { listener.remove() }
+    }
+
+    fun showsFlow(groupId: String): Flow<List<ShowEntry>> = callbackFlow {
+        val listener = db.collection("groups").document(groupId).collection("shows")
+            .orderBy("addedAt", Query.Direction.ASCENDING)
+            .addSnapshotListener { snap, error ->
+                if (error != null || snap == null) return@addSnapshotListener
+                trySend(snap.documents.map { it.toShowEntry() })
+            }
+        awaitClose { listener.remove() }
+    }
+
+    fun watchedFlow(groupId: String, uid: String): Flow<List<WatchedEpisode>> = callbackFlow {
+        val listener = db.collection("groups").document(groupId)
+            .collection("watched").document(uid).collection("episodes")
+            .addSnapshotListener { snap, error ->
+                if (error != null || snap == null) return@addSnapshotListener
+                trySend(snap.documents.map { it.toWatchedEpisode() })
+            }
+        awaitClose { listener.remove() }
+    }
+
+    fun memberWatchedFlow(groupId: String, memberUids: List<String>): Flow<Map<String, List<WatchedEpisode>>> = callbackFlow {
+        val watched = memberUids.associateWith { emptyList<WatchedEpisode>() }.toMutableMap()
+        val listeners = memberUids.map { uid ->
+            db.collection("groups").document(groupId).collection("watched")
+                .document(uid).collection("episodes")
+                .addSnapshotListener { snap, error ->
+                    if (error != null || snap == null) return@addSnapshotListener
+                    watched[uid] = snap.documents.map { it.toWatchedEpisode() }
+                        .sortedWith(compareBy({ it.season }, { it.number }))
+                    trySend(watched.toMap())
+                }
+        }
+        trySend(watched.toMap())
+        awaitClose { listeners.forEach { it.remove() } }
+    }
+
+    fun notesFlow(groupId: String, uid: String): Flow<List<Note>> = callbackFlow {
+        val base = db.collection("groups").document(groupId).collection("notes")
+        val publicNotes = mutableMapOf<String, Note>()
+        val myNotes = mutableMapOf<String, Note>()
+
+        fun publish() {
+            val all = (publicNotes.values + myNotes.values)
+                .distinctBy { it.id }
+                .sortedByDescending { it.createdAt }
+            trySend(all)
+        }
+
+        fun read(snap: com.google.firebase.firestore.QuerySnapshot?, map: MutableMap<String, Note>) {
+            if (snap == null) return
+            map.clear()
+            snap.documents.forEach { map[it.id] = it.toNote() }
+            publish()
+        }
+
+        val l1 = base.whereEqualTo("isPublic", true)
+            .addSnapshotListener { snap, _ -> read(snap, publicNotes) }
+        val l2 = base.whereEqualTo("uid", uid)
+            .addSnapshotListener { snap, _ -> read(snap, myNotes) }
+        awaitClose { l1.remove(); l2.remove() }
+    }
+
+    fun memberPublicNotesFlow(groupId: String, memberUid: String): Flow<List<Note>> = callbackFlow {
+        val listener = db.collection("groups").document(groupId).collection("notes")
+            .whereEqualTo("isPublic", true)
+            .addSnapshotListener { snap, _ ->
+                val notes = snap?.documents.orEmpty().map { it.toNote() }.filter { it.uid == memberUid }
+                trySend(notes.sortedByDescending { it.createdAt })
+            }
+        awaitClose { listener.remove() }
+    }
+
+    fun eventsFlow(groupId: String): Flow<List<GroupEvent>> = callbackFlow {
+        val listener = db.collection("groups").document(groupId).collection("events")
+            .orderBy("createdAt", Query.Direction.DESCENDING).limit(60)
+            .addSnapshotListener { snap, error ->
+                if (error != null || snap == null) return@addSnapshotListener
+                trySend(snap.documents.map { it.toGroupEvent() })
+            }
+        awaitClose { listener.remove() }
+    }
+
+    fun activityEventsFlow(uid: String): Flow<Pair<String, GroupEvent>> = callbackFlow {
+        val eventListeners = mutableListOf<ListenerRegistration>()
+        val seen = mutableMapOf<String, MutableSet<String>>()
+        val initialized = mutableSetOf<String>()
+
+        val groupsListener = db.collection("groups").whereArrayContains("memberUids", uid)
+            .addSnapshotListener { groupSnap, _ ->
+                eventListeners.forEach { it.remove() }
+                eventListeners.clear()
+
+                groupSnap?.documents?.forEach { groupDoc ->
+                    val groupId = groupDoc.id
+                    val eventIds = seen.getOrPut(groupId) { mutableSetOf() }
+                    val firstSnapshot = initialized.add(groupId)
+
+                    val listener = db.collection("groups").document(groupId).collection("events")
+                        .addSnapshotListener { snap, error ->
+                            if (error != null || snap == null) return@addSnapshotListener
+                            if (snap.metadata.hasPendingWrites()) return@addSnapshotListener
+
+                            val fresh = if (firstSnapshot) {
+                                snap.documents.forEach { eventIds.add(it.id) }
+                                emptyList()
+                            } else {
+                                snap.documents.filter { !eventIds.contains(it.id) }
+                            }
+                            fresh.forEach { eventIds.add(it.id) }
+                            fresh.forEach { trySend(groupId to it.toGroupEvent()) }
+                        }
+                    eventListeners.add(listener)
+                }
+            }
+
+        awaitClose {
+            groupsListener.remove()
+            eventListeners.forEach { it.remove() }
+        }
+    }
+
+    suspend fun group(groupId: String): Group? {
+        val snap = db.collection("groups").document(groupId).get().await()
+        return if (snap.exists()) snap.toGroup() else null
+    }
+
+    suspend fun groupByCode(code: String): Group? {
+        val snap = db.collection("groups").whereEqualTo("inviteCode", code.trim().uppercase()).limit(1).get().await()
+        return snap.documents.firstOrNull()?.toGroup()
+    }
+
+    private suspend fun memberIds(groupId: String): List<String> =
+        group(groupId)?.memberUids ?: emptyList()
+
+    private fun newCode(): String {
+        val alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+        return (1..6).map { alphabet[Random.nextInt(alphabet.length)] }.joinToString("")
+    }
+
+    suspend fun createGroup(name: String, uid: String, myName: String): Group {
+        val ref = db.collection("groups").document()
+        var code = newCode()
+        while (groupByCode(code) != null) code = newCode()
+        val group = Group(ref.id, name.trim(), code, uid, System.currentTimeMillis(), listOf(uid))
+        ref.set(
+            mapOf(
+                "name" to group.name,
+                "inviteCode" to group.inviteCode,
+                "createdBy" to uid,
+                "createdAt" to group.createdAt,
+                "memberUids" to group.memberUids
+            )
+        ).await()
+        addMember(ref.id, uid, myName, group.memberUids)
+        subscribe(ref.id)
+        return group
+    }
+
+    suspend fun joinGroup(code: String, uid: String, myName: String): Group? {
+        val group = groupByCode(code) ?: return null
+        if (!group.memberUids.contains(uid)) {
+            db.collection("groups").document(group.id)
+                .update("memberUids", FieldValue.arrayUnion(uid)).await()
+            addMember(group.id, uid, myName, group.memberUids + uid)
+        }
+        subscribe(group.id)
+        return group
+    }
+
+    private suspend fun addMember(groupId: String, uid: String, name: String, memberUids: List<String>) {
+        db.collection("groups").document(groupId).collection("members").document(uid)
+            .set(
+                mapOf(
+                    "uid" to uid,
+                    "name" to name,
+                    "memberUids" to memberUids,
+                    "joinedAt" to System.currentTimeMillis()
+                )
+            )
+            .await()
+    }
+
+    suspend fun subscribe(groupId: String) {
+        runCatching { messaging.subscribeToTopic("g_$groupId").await() }
+    }
+
+    suspend fun addShow(groupId: String, show: TvShow, uid: String) {
+        val ref = db.collection("groups").document(groupId).collection("shows").document(show.id.toString())
+        ref.set(
+            mapOf(
+                "name" to show.name,
+                "imageUrl" to (show.image?.medium ?: show.image?.original ?: ""),
+                "addedBy" to uid,
+                "memberUids" to memberIds(groupId),
+                "addedAt" to System.currentTimeMillis()
+            )
+        ).await()
+    }
+
+    suspend fun markEpisodes(
+        groupId: String,
+        uid: String,
+        authorName: String,
+        show: ShowEntry,
+        episodes: List<TvEpisode>,
+        summary: String
+    ) {
+        val watched = db.collection("groups").document(groupId)
+            .collection("watched").document(uid).collection("episodes")
+        val groupMemberUids = memberIds(groupId)
+        db.runBatch { batch ->
+            episodes.forEach { ep ->
+                batch.set(
+                    watched.document(ep.id.toString()),
+                    mapOf(
+                        "season" to ep.season,
+                        "number" to ep.number,
+                        "name" to ep.name,
+                        "showId" to show.id,
+                        "memberUids" to groupMemberUids,
+                        "markedAt" to System.currentTimeMillis()
+                    )
+                )
+            }
+            batch.set(
+                db.collection("groups").document(groupId).collection("events").document(),
+                mapOf(
+                    "uid" to uid,
+                    "authorName" to authorName,
+                    "showId" to show.id,
+                    "memberUids" to groupMemberUids,
+                    "body" to "$authorName $summary of ${show.name}",
+                    "createdAt" to System.currentTimeMillis()
+                )
+            )
+        }.await()
+    }
+
+    suspend fun unmarkEpisode(groupId: String, uid: String, episodeId: Int) {
+        db.collection("groups").document(groupId).collection("watched")
+            .document(uid).collection("episodes").document(episodeId.toString()).delete().await()
+    }
+
+    suspend fun resetShowProgress(groupId: String, uid: String, episodeIds: List<String>) {
+        val episodes = db.collection("groups").document(groupId).collection("watched")
+            .document(uid).collection("episodes")
+        episodeIds.chunked(300).forEach { chunk ->
+            db.runBatch { batch ->
+                chunk.forEach { id -> batch.delete(episodes.document(id)) }
+            }.await()
+        }
+    }
+
+    suspend fun removeShow(groupId: String, showId: String) {
+        db.collection("groups").document(groupId).collection("shows").document(showId).delete().await()
+    }
+
+    suspend fun deleteGroup(groupId: String) {
+        val root = db.collection("groups").document(groupId)
+        val watched = root.collection("watched")
+        watched.get().await().documents.forEach { member ->
+            deleteCollection(member.reference.collection("episodes"))
+        }
+        deleteCollection(watched)
+        deleteCollection(root.collection("shows"))
+        deleteCollection(root.collection("members"))
+        deleteCollection(root.collection("notes"))
+        deleteCollection(root.collection("events"))
+        root.delete().await()
+        runCatching { messaging.unsubscribeFromTopic("g_$groupId").await() }
+    }
+
+    private suspend fun deleteCollection(collection: CollectionReference) {
+        while (true) {
+            val docs = collection.limit(300).get().await().documents
+            if (docs.isEmpty()) return
+            db.runBatch { batch ->
+                docs.forEach { batch.delete(it.reference) }
+            }.await()
+        }
+    }
+
+    suspend fun addNote(
+        groupId: String,
+        uid: String,
+        authorName: String,
+        show: ShowEntry,
+        scope: String,
+        season: Int,
+        episode: Int,
+        text: String,
+        isPublic: Boolean
+    ) {
+        val where = when (scope) {
+            "season" -> "S${season.toString().padStart(2, '0')} of ${show.name}"
+            "episode" -> "S${season.toString().padStart(2, '0')}E${episode.toString().padStart(2, '0')} of ${show.name}"
+            else -> show.name
+        }
+        val groupMemberUids = memberIds(groupId)
+        db.runBatch { batch ->
+            batch.set(
+                db.collection("groups").document(groupId).collection("notes").document(),
+                mapOf(
+                    "uid" to uid,
+                    "authorName" to authorName,
+                    "scope" to scope,
+                    "showId" to show.id,
+                    "season" to season,
+                    "episode" to episode,
+                    "text" to text,
+                    "isPublic" to isPublic,
+                    "memberUids" to groupMemberUids,
+                    "createdAt" to System.currentTimeMillis()
+                )
+            )
+            if (isPublic) {
+                batch.set(
+                    db.collection("groups").document(groupId).collection("events").document(),
+                    mapOf(
+                        "uid" to uid,
+                        "authorName" to authorName,
+                        "showId" to show.id,
+                        "memberUids" to groupMemberUids,
+                        "body" to "$authorName wrote a note about $where",
+                        "createdAt" to System.currentTimeMillis()
+                    )
+                )
+            }
+        }.await()
+    }
+}
+
+
+
+================================================
+FILE: app/src/main/java/com/dionlobo/watchtogether/Screens.kt
+================================================
+package com.dionlobo.watchtogether
+
+import android.content.ClipData
+import android.widget.Toast
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Comment
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+
+private fun epLabel(season: Int, number: Int) =
+    "S${season.toString().padStart(2, '0')}E${number.toString().padStart(2, '0')}"
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun GroupDetailScreen(vm: MainViewModel, group: Group, go: (Screen) -> Unit) {
+    val uid = vm.uid!!
+    val members by remember(group.id) { vm.repo.membersFlow(group.id) }.collectAsState(emptyList())
+    val shows by remember(group.id) { vm.repo.showsFlow(group.id) }.collectAsState(emptyList())
+    val notes by remember(group.id, uid) { vm.repo.notesFlow(group.id, uid) }.collectAsState(emptyList())
+    val events by remember(group.id) { vm.repo.eventsFlow(group.id) }.collectAsState(emptyList())
+    val memberIds = members.map { it.uid }
+    val watchedByMember by remember(group.id, memberIds) {
+        vm.repo.memberWatchedFlow(group.id, memberIds)
+    }.collectAsState(emptyMap())
+    var tab by remember { mutableStateOf(0) }
+    var confirmDelete by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val clipboard = LocalClipboard.current
+    val scope = rememberCoroutineScope()
+    val accents = listOf(Brand.Blue, Brand.Mint, Brand.Coral, Brand.Amber)
+
+    fun copy(text: String, label: String) {
+        scope.launch { clipboard.setClipEntry(ClipEntry(ClipData.newPlainText(label, text))) }
+        Toast.makeText(context, label, Toast.LENGTH_SHORT).show()
+    }
+
+    Scaffold(
+        containerColor = Brand.Paper,
+        topBar = {
+            TopAppBar(
+                title = { Text(group.name.uppercase(), style = MaterialTheme.typography.labelLarge, color = Brand.Ink) },
+                actions = {
+                    PunchButton(
+                        text = group.inviteCode,
+                        onClick = { copy(group.inviteCode, "Code copied") },
+                        modifier = Modifier.width(132.dp).height(48.dp),
+                        color = Brand.Amber,
+                        contentColor = Brand.OnAccent,
+                        leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null, tint = Brand.OnAccent) }
+                    )
+                    if (group.createdBy == uid) {
+                        PunchIconButton(onClick = { confirmDelete = true }, color = Brand.Coral, contentColor = Brand.OnAccent) {
+                            Icon(Icons.Default.Delete, contentDescription = "Delete circle", tint = Brand.OnAccent)
+                        }
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Brand.Paper)
+            )
+        }
+    ) { padding ->
+        DecorBackground {
+            Column(modifier = Modifier.padding(padding).fillMaxSize()) {
+                Column(Modifier.padding(horizontal = 20.dp)) {
+                    PunchTabs(listOf("Shows", "Activity", "Notes", "Members"), tab) { tab = it }
+                }
+                Spacer(Modifier.height(14.dp))
+                when (tab) {
+                    0 -> LazyColumn(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp)
+                    ) {
+                        if (shows.isEmpty()) {
+                            item {
+                                SoftCard(modifier = Modifier.fillMaxWidth()) {
+                                    Column(Modifier.padding(20.dp)) {
+                                        StatusPill("NO SHOWS", Brand.Amber)
+                                        Spacer(Modifier.height(12.dp))
+                                        Text("The shelf is empty.", style = MaterialTheme.typography.headlineMedium, color = Brand.Ink)
+                                        Spacer(Modifier.height(4.dp))
+                                        Text("Add a show to start tracking episodes.", color = Brand.Muted)
+                                    }
+                                }
+                            }
+                        }
+                        itemsIndexed(shows) { index, show ->
+                            AnimatedEnter(index * 50) {
+                                PunchCard(
+                                    onClick = { go(Screen.ShowDetail(group, show)) },
+                                    accent = accents[index % accents.size]
+                                ) {
+                                    Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        ShowThumb(show.imageUrl, Brand.Blue)
+                                        Spacer(Modifier.width(14.dp))
+                                        Column(Modifier.weight(1f)) {
+                                            Text(show.name, style = MaterialTheme.typography.titleLarge, color = Brand.Ink)
+                                            Spacer(Modifier.height(5.dp))
+                                            addedByText(show, members)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    1 -> LazyColumn(
+                        modifier = Modifier.weight(1f),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp)
+                    ) {
+                        if (events.isEmpty()) {
+                            item { Text("No activity yet. Mark an episode to get things moving.", color = Brand.Muted) }
+                        }
+                        itemsIndexed(events) { index, event ->
+                            Row(
+                                Modifier.fillMaxWidth().height(IntrinsicSize.Min).padding(vertical = 8.dp),
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                Box(
+                                    Modifier.width(14.dp).fillMaxHeight(),
+                                    contentAlignment = Alignment.TopCenter
+                                ) {
+                                    if (index < events.size - 1) {
+                                        Box(Modifier.width(2.dp).fillMaxHeight().background(Brand.Border))
+                                    }
+                                    Box(
+                                        Modifier.size(12.dp).clip(CircleShape)
+                                            .background(if (index == 0) Brand.Blue else Brand.Mint)
+                                            .border(2.dp, Brand.Stroke, CircleShape)
+                                    )
+                                }
+                                Spacer(Modifier.width(10.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(event.body.ifBlank { event.authorName }, color = Brand.Ink, fontSize = 15.sp)
+                                    Spacer(Modifier.height(2.dp))
+                                    Text(
+                                        "${event.authorName} · ${timeText(event.createdAt)}",
+                                        fontSize = 11.sp,
+                                        color = Brand.Muted
+                                    )
+                                }
+                            }
+                        }
+                    }
+                     2 -> LazyColumn(
+                         modifier = Modifier.weight(1f),
+                         verticalArrangement = Arrangement.spacedBy(10.dp),
+                         contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp)
+                     ) {
+                         if (notes.isEmpty()) {
+                             item { Text("No notes yet. Add them from a show or episode.", color = Brand.Muted) }
+                         }
+                         itemsIndexed(notes) { index, note ->
+                             AnimatedEnter(index * 50) {
+                                 PunchCard(
+                                     onClick = {
+                                         shows.firstOrNull { it.id == note.showId }?.let { go(Screen.ShowDetail(group, it)) }
+                                     },
+                                     accent = if (note.isPublic) Brand.Mint else Brand.Coral
+                                 ) {
+                                     Column(Modifier.padding(16.dp)) {
+                                         Text(note.text, style = MaterialTheme.typography.bodyLarge, color = Brand.Ink)
+                                         Spacer(Modifier.height(12.dp))
+                                         Row(verticalAlignment = Alignment.CenterVertically) {
+                                             Avatar(
+                                                 note.authorName.take(1).uppercase(),
+                                                 accents[index % accents.size],
+                                                 size = 30.dp
+                                             )
+                                             Spacer(Modifier.width(10.dp))
+                                             Column(Modifier.weight(1f)) {
+                                                 Text(
+                                                     if (note.uid == uid) "${note.authorName} (you)" else note.authorName,
+                                                     fontSize = 12.sp,
+                                                     fontWeight = FontWeight.Bold,
+                                                     color = Brand.Ink
+                                                 )
+                                                 Text(
+                                                     "${noteContext(note, shows)} · ${timeText(note.createdAt)}",
+                                                     fontSize = 11.sp,
+                                                     color = Brand.Muted
+                                                 )
+                                             }
+                                         }
+                                     }
+                                 }
+                             }
+                         }
+                     }
+                     3 -> LazyColumn(
+                         modifier = Modifier.weight(1f),
+                         verticalArrangement = Arrangement.spacedBy(10.dp),
+                         contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp)
+                     ) {
+                         itemsIndexed(members) { index, member ->
+                             val memberWatched = watchedByMember[member.uid].orEmpty()
+                             val showCount = memberWatched.map { it.showId }.distinct().size
+                             AnimatedEnter(index * 50) {
+                                 PunchCard(
+                                     onClick = { go(Screen.MemberDetail(group, member)) },
+                                     accent = accents[index % accents.size]
+                                 ) {
+                                     Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                                         Avatar(member.name.take(1).uppercase(), accents[index % accents.size])
+                                         Spacer(Modifier.width(12.dp))
+                                         Column(Modifier.weight(1f)) {
+                                             Text(
+                                                 if (member.uid == uid) "${member.name} (you)" else member.name,
+                                                 style = MaterialTheme.typography.titleMedium,
+                                                 color = Brand.Ink
+                                             )
+                                             Spacer(Modifier.height(4.dp))
+                                             Text(
+                                                 "${memberWatched.size} ${if (memberWatched.size == 1) "episode" else "episodes"} · $showCount ${if (showCount == 1) "show" else "shows"}",
+                                                 fontSize = 12.sp,
+                                                 color = Brand.Muted
+                                             )
+                                             Spacer(Modifier.height(2.dp))
+                                             Text("Tap for progress and notes", fontSize = 11.sp, color = Brand.Blue)
+                                         }
+                                         StatusPill("${memberWatched.size}", accents[index % accents.size])
+                                     }
+                                 }
+                             }
+                         }
+                     }
+                }
+                if (tab == 0) {
+                    Column(Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
+                        PunchButton(
+                            text = "Add a show",
+                            onClick = { go(Screen.AddShow(group)) },
+                            modifier = Modifier.fillMaxWidth(),
+                            color = Brand.Blue,
+                            leadingIcon = { Icon(Icons.Default.Add, contentDescription = null, tint = Brand.OnPrimary) }
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            containerColor = Brand.Surface,
+            shape = RoundedCornerShape(26.dp),
+            title = { Text("Delete circle?", color = Brand.Ink, fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "This permanently removes \"${group.name}\" and all of its shows, notes, and progress for everyone.",
+                    color = Brand.Muted
+                )
+            },
+            confirmButton = {
+                PunchButton(
+                    text = "Delete",
+                    modifier = Modifier.width(120.dp),
+                    color = Brand.Coral,
+                    contentColor = Brand.OnAccent,
+                    onClick = {
+                        confirmDelete = false
+                        vm.launchApp {
+                            runCatching { vm.repo.deleteGroup(group.id) }
+                                .onSuccess { go(Screen.Groups) }
+                                .onFailure { if (!it.isCancellation()) vm.message = "Could not delete circle: ${it.localizedMessage}" }
+                        }
+                    }
+                )
+            },
+            dismissButton = {
+                PunchButton(
+                    text = "Cancel",
+                    modifier = Modifier.width(120.dp),
+                    color = Brand.InkSoft,
+                    contentColor = Brand.Ink,
+                    borderColor = Brand.Border,
+                    onClick = { confirmDelete = false }
+                )
+            }
+        )
+    }
+}
+
+@Composable
+private fun GroupProgressList(
+    members: List<Member>,
+    watched: Map<String, List<WatchedEpisode>>,
+    showId: String,
+    total: Int,
+    currentUid: String,
+    onMember: (Member) -> Unit
+) {
+    val accents = listOf(Brand.Blue, Brand.Mint, Brand.Coral, Brand.Amber)
+    val rows = members
+        .map { member -> member to watched[member.uid].orEmpty().count { it.showId == showId } }
+        .sortedWith(compareByDescending<Pair<Member, Int>> { it.second }.thenBy { it.first.name })
+
+    SoftCard(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.fillMaxWidth().padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                StatusPill("PROGRESS", Brand.Blue)
+                Spacer(Modifier.weight(1f))
+                Text("$total EPISODES", fontSize = 10.sp, fontWeight = FontWeight.Black, color = Brand.Muted)
+            }
+            Spacer(Modifier.height(14.dp))
+            if (rows.isEmpty()) {
+                Text("No one here yet.", color = Brand.Muted)
+            }
+            rows.forEachIndexed { index, row ->
+                val member = row.first
+                val count = row.second
+                val fraction = if (total == 0) 0f else count.toFloat() / total
+                Box(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable { onMember(member) }
+                        .padding(vertical = 6.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "${index + 1}",
+                            modifier = Modifier.width(18.dp),
+                            color = Brand.Muted,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                        Avatar(member.name.take(1).uppercase(), accents[index % accents.size], size = 30.dp)
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    if (member.uid == currentUid) "${member.name} (you)" else member.name,
+                                    color = Brand.Ink,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(Modifier.weight(1f))
+                                Text("$count/$total", color = Brand.Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Spacer(Modifier.height(5.dp))
+                            Box(
+                                Modifier.fillMaxWidth().height(9.dp).clip(RoundedCornerShape(6.dp)).background(Brand.PaperDim)
+                            ) {
+                                Box(
+                                    Modifier.fillMaxWidth(fraction).fillMaxHeight().clip(RoundedCornerShape(6.dp))
+                                        .background(Brush.horizontalGradient(listOf(accents[index % accents.size], Brand.Mint)))
+                                )
+                            }
+                        }
+                    }
+                }
+                if (index < rows.lastIndex) Spacer(Modifier.height(10.dp))
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun GroupProgressScreen(vm: MainViewModel, group: Group, show: ShowEntry, go: (Screen) -> Unit) {
+    val uid = vm.uid!!
+    val members by remember(group.id) { vm.repo.membersFlow(group.id) }.collectAsState(emptyList())
+    val memberIds = members.map { it.uid }
+    val memberWatched by remember(group.id, memberIds) {
+        vm.repo.memberWatchedFlow(group.id, memberIds)
+    }.collectAsState(emptyMap())
+    val counts = members.map { memberWatched[it.uid].orEmpty().count { episode -> episode.showId == show.id } }
+    val total = TvmazeApi.cachedEpisodes(show.id.toInt())?.size
+        ?: memberWatched.values.flatten().filter { it.showId == show.id }.distinctBy { "${it.season}-${it.number}" }.size
+    val average = if (counts.isEmpty() || total == 0) 0f else counts.average().toFloat() / total
+
+    Scaffold(
+        containerColor = Brand.Paper,
+        topBar = {
+            TopAppBar(
+                title = { Text("PROGRESS", style = MaterialTheme.typography.labelLarge, color = Brand.Ink) },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Brand.Paper)
+            )
+        }
+    ) { padding ->
+        DecorBackground {
+            LazyColumn(
+                modifier = Modifier.padding(padding).fillMaxSize(),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                item {
+                    SoftCard(modifier = Modifier.fillMaxWidth()) {
+                        Row(Modifier.fillMaxWidth().padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+                            ShowThumb(show.imageUrl, Brand.Blue)
+                            Spacer(Modifier.width(16.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(show.name.uppercase(), style = MaterialTheme.typography.headlineMedium, color = Brand.Ink)
+                                Spacer(Modifier.height(6.dp))
+                                Text("${members.size} ${if (members.size == 1) "MEMBER" else "MEMBERS"} · ${(average * 100).toInt()}% AVERAGE", color = Brand.Muted)
+                            }
+                        }
+                    }
+                }
+                item {
+                    GroupProgressList(
+                        members = members,
+                        watched = memberWatched,
+                        showId = show.id,
+                        total = total,
+                        currentUid = uid,
+                        onMember = { go(Screen.MemberDetail(group, it)) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MemberDetailScreen(vm: MainViewModel, group: Group, member: Member, go: (Screen) -> Unit) {
+    val uid = vm.uid!!
+    val watched by remember(group.id, member.uid) { vm.repo.watchedFlow(group.id, member.uid) }.collectAsState(emptyList())
+    val shows by remember(group.id) { vm.repo.showsFlow(group.id) }.collectAsState(emptyList())
+    val notes by remember(group.id, member.uid) { vm.repo.memberPublicNotesFlow(group.id, member.uid) }.collectAsState(emptyList())
+    val accents = listOf(Brand.Blue, Brand.Mint, Brand.Coral, Brand.Amber)
+    val watchedShows = watched.groupBy { it.showId }.toSortedMap(
+        compareBy { showId -> shows.firstOrNull { it.id == showId }?.name ?: showId }
+    )
+
+    Scaffold(
+        containerColor = Brand.Paper,
+        topBar = {
+            TopAppBar(
+                title = { Text(member.name.uppercase(), style = MaterialTheme.typography.labelLarge, color = Brand.Ink) },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Brand.Paper)
+            )
+        }
+    ) { padding ->
+        DecorBackground {
+            LazyColumn(
+                modifier = Modifier.padding(padding).fillMaxSize(),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                item {
+                    SoftCard(modifier = Modifier.fillMaxWidth()) {
+                        Row(Modifier.fillMaxWidth().padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Avatar(member.name.take(1).uppercase(), accents[0], size = 46.dp)
+                            Spacer(Modifier.width(16.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    if (member.uid == uid) "${member.name} (you)" else member.name,
+                                    style = MaterialTheme.typography.headlineMedium,
+                                    color = Brand.Ink
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    "${watched.size} ${if (watched.size == 1) "episode" else "episodes"} across ${watchedShows.size} ${if (watchedShows.size == 1) "show" else "shows"}",
+                                    color = Brand.Muted
+                                )
+                            }
+                        }
+                    }
+                }
+                item { Eyebrow("PROGRESS", Brand.Blue) }
+                if (watchedShows.isEmpty()) {
+                    item { Text("Nothing watched yet.", color = Brand.Muted) }
+                }
+                watchedShows.forEach { (showId, episodesWatched) ->
+                    item {
+                        val show = shows.firstOrNull { it.id == showId }
+                        val total = show?.let { TvmazeApi.cachedEpisodes(it.id.toInt())?.size } ?: episodesWatched.size
+                        PunchCard(
+                            onClick = { show?.let { go(Screen.ShowDetail(group, it)) } },
+                            accent = accents[shows.indexOfFirst { it.id == showId }.coerceAtLeast(0) % accents.size]
+                        ) {
+                            Column(Modifier.padding(16.dp)) {
+                                Text(showName(shows, showId), color = Brand.Ink, fontWeight = FontWeight.Bold)
+                                Spacer(Modifier.height(4.dp))
+                                Text("${episodesWatched.size} of $total watched", color = Brand.Muted, fontSize = 12.sp)
+                                Spacer(Modifier.height(10.dp))
+                                episodesWatched.groupBy { it.season }.toSortedMap().forEach { (season, seasonEpisodes) ->
+                                    Spacer(Modifier.height(6.dp))
+                                    Text("SEASON $season", color = Brand.Blue, fontSize = 10.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                                    Spacer(Modifier.height(3.dp))
+                                    Text(
+                                        seasonEpisodes.joinToString("  ·  ") { epLabel(it.season, it.number) },
+                                        color = Brand.Ink,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                item { Eyebrow("PUBLIC NOTES", Brand.Amber) }
+                if (notes.isEmpty()) {
+                    item { Text("No public notes from ${member.name} yet.", color = Brand.Muted) }
+                }
+                itemsIndexed(notes) { index, note ->
+                    AnimatedEnter(index * 50) {
+                        PunchCard(
+                            onClick = {
+                                shows.firstOrNull { it.id == note.showId }?.let { go(Screen.ShowDetail(group, it)) }
+                            },
+                            accent = Brand.Mint
+                        ) {
+                            Column(Modifier.padding(16.dp)) {
+                                Text(note.text, style = MaterialTheme.typography.bodyLarge, color = Brand.Ink)
+                                Spacer(Modifier.height(10.dp))
+                                Text(
+                                    "${noteContext(note, shows)} · ${timeText(note.createdAt)}",
+                                    fontSize = 11.sp,
+                                    color = Brand.Muted
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ShowThumb(url: String, accent: Color) {
+    Box(
+        Modifier
+            .size(width = 52.dp, height = 72.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Brush.linearGradient(listOf(accent.copy(alpha = 0.25f), Brand.Amber.copy(alpha = 0.2f))))
+            .border(2.dp, Brand.Stroke, RoundedCornerShape(12.dp)),
+        contentAlignment = Alignment.Center
+    ) {
+        if (url.isNotBlank()) {
+            AsyncImage(
+                model = url,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+            Box(Modifier.fillMaxSize().background(Brand.ImageScrim))
+        } else {
+            Text("WT", color = Brand.Ink, fontWeight = FontWeight.Black, fontSize = 16.sp)
+        }
+    }
+}
+
+@Composable
+private fun addedByText(show: ShowEntry, members: List<Member>) {
+    Text(
+        "Added by ${members.firstOrNull { it.uid == show.addedBy }?.name ?: "someone"}",
+        fontSize = 12.sp,
+        color = Brand.Muted
+    )
+}
+
+private fun noteScopeLabel(note: Note) = when (note.scope) {
+    "season" -> "Season ${note.season}"
+    "episode" -> epLabel(note.season, note.episode)
+    else -> "Show note"
+}
+
+private fun showName(shows: List<ShowEntry>, showId: String) =
+    shows.firstOrNull { it.id == showId }?.name ?: if (showId.isBlank()) "Circle note" else "Removed show"
+
+private fun noteContext(note: Note, shows: List<ShowEntry>) =
+    "${showName(shows, note.showId)} · ${noteScopeLabel(note)}"
+
+private fun timeText(ts: Long): String {
+    if (ts <= 0L) return ""
+    val minutes = (System.currentTimeMillis() - ts) / 60000
+    return when {
+        minutes < 1 -> "just now"
+        minutes < 60 -> "$minutes min ago"
+        minutes < 1440 -> "${minutes / 60} h ago"
+        else -> "${minutes / 1440} d ago"
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ShowDetailScreen(vm: MainViewModel, group: Group, show: ShowEntry, go: (Screen) -> Unit) {
+    val uid = vm.uid!!
+    val watched by remember(group.id, uid) { vm.repo.watchedFlow(group.id, uid) }.collectAsState(emptyList())
+    val cachedEpisodes = remember(show.id) { TvmazeApi.cachedEpisodes(show.id.toInt()) }
+    var episodes by remember(show.id) { mutableStateOf(cachedEpisodes ?: emptyList()) }
+    var loading by remember(show.id) { mutableStateOf(cachedEpisodes == null) }
+    var rangeTarget by remember { mutableStateOf<TvEpisode?>(null) }
+    var noteTarget by remember { mutableStateOf<Pair<String, Pair<Int, Int>>?>(null) }
+    var confirmRemove by remember { mutableStateOf(false) }
+    var confirmRewatch by remember { mutableStateOf(false) }
+    var selectedSeason by remember(show.id) { mutableStateOf<Int?>(null) }
+    var seasonMenuOpen by remember { mutableStateOf(false) }
+
+    LaunchedEffect(show.id) {
+        try {
+            episodes = TvmazeApi.episodes(show.id.toInt()).sortedWith(compareBy({ it.season }, { it.number }))
+        } catch (e: Exception) {
+            if (!e.isCancellation()) vm.message = "Could not load episodes: ${e.localizedMessage}"
+        } finally {
+            loading = false
+        }
+    }
+
+    val watchedIds = watched.map { it.id }.toSet()
+    val seasons = episodes.groupBy { it.season }.toSortedMap()
+    val seasonOptions = seasons.keys.toList()
+    val selectedEpisodes = selectedSeason?.let { seasons[it].orEmpty() }.orEmpty()
+
+    LaunchedEffect(seasonOptions) {
+        if (seasonOptions.isNotEmpty() && selectedSeason !in seasonOptions) selectedSeason = seasonOptions.first()
+    }
+
+    Scaffold(
+        containerColor = Brand.Paper,
+        topBar = {
+            TopAppBar(
+                title = { Text(show.name.uppercase(), style = MaterialTheme.typography.labelLarge, color = Brand.Ink) },
+                actions = {
+                    if (show.addedBy == uid || group.createdBy == uid) {
+                        PunchIconButton(onClick = { confirmRemove = true }, color = Brand.Coral, contentColor = Brand.OnAccent) {
+                            Icon(Icons.Default.Delete, contentDescription = "Remove show", tint = Brand.OnAccent)
+                        }
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Brand.Paper)
+            )
+        }
+    ) { padding ->
+        DecorBackground {
+            if (loading) {
+                LazyColumn(
+                    modifier = Modifier.padding(padding).fillMaxSize(),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp)
+                ) {
+                    item {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            ShimmerBar(76.dp, 108.dp)
+                            Spacer(Modifier.width(16.dp))
+                            Column(Modifier.weight(1f)) {
+                                ShimmerBar(180.dp, 22.dp)
+                                Spacer(Modifier.height(10.dp))
+                                ShimmerBar(120.dp, 12.dp)
+                            }
+                        }
+                        Spacer(Modifier.height(24.dp))
+                    }
+                    items(6) { ShowSkeletonRow() }
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.padding(padding).fillMaxSize(),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    item {
+                        val done = episodes.count { watchedIds.contains(it.id.toString()) }
+                        val progress = if (episodes.isEmpty()) 0f else done.toFloat() / episodes.size
+                        val complete = episodes.isNotEmpty() && done == episodes.size
+                        SoftCard(modifier = Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(18.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    ShowThumb(show.imageUrl, Brand.Blue)
+                                    Spacer(Modifier.width(16.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            show.name.uppercase(),
+                                            style = MaterialTheme.typography.headlineMedium,
+                                            color = Brand.Ink
+                                        )
+                                        Spacer(Modifier.height(6.dp))
+                                        Text("$done of ${episodes.size} watched", color = Brand.Muted)
+                                        if (complete) {
+                                            Spacer(Modifier.height(8.dp))
+                                            StatusPill("COMPLETE", Brand.Mint)
+                                        }
+                                    }
+                                    ProgressRing(progress)
+                                }
+                                Spacer(Modifier.height(14.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    PunchButton(
+                                        text = "Add a note",
+                                        onClick = { noteTarget = "show" to (0 to 0) },
+                                        modifier = Modifier.weight(1f).height(46.dp),
+                                        color = Brand.InkSoft,
+                                        contentColor = Brand.Ink,
+                                        borderColor = Brand.Border,
+                                        leadingIcon = { Icon(Icons.AutoMirrored.Filled.Comment, contentDescription = null, tint = Brand.Ink) }
+                                    )
+                                    PunchButton(
+                                        text = "Progress",
+                                        onClick = { go(Screen.GroupProgress(group, show)) },
+                                        modifier = Modifier.weight(1f).height(46.dp),
+                                        color = Brand.Blue,
+                                        contentColor = Brand.OnPrimary,
+                                        leadingIcon = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = Brand.OnPrimary) }
+                                    )
+                                }
+                                if (complete) {
+                                    Spacer(Modifier.height(10.dp))
+                                    PunchButton(
+                                        text = "Watch again",
+                                        onClick = { confirmRewatch = true },
+                                        modifier = Modifier.fillMaxWidth().height(46.dp),
+                                        color = Brand.Amber,
+                                        contentColor = Brand.OnAccent
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    item {
+                        SoftCard(modifier = Modifier.fillMaxWidth()) {
+                            Row(
+                                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(Modifier.weight(1f)) {
+                                    PunchButton(
+                                        text = "Choose season",
+                                        onClick = { seasonMenuOpen = true },
+                                        modifier = Modifier.fillMaxWidth().height(44.dp),
+                                        color = Brand.InkSoft,
+                                        contentColor = Brand.Ink,
+                                        borderColor = Brand.Border,
+                                        leadingIcon = {
+                                            Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, tint = Brand.Ink)
+                                        }
+                                    )
+                                    DropdownMenu(
+                                        expanded = seasonMenuOpen,
+                                        onDismissRequest = { seasonMenuOpen = false },
+                                        modifier = Modifier.background(Brand.Surface)
+                                    ) {
+                                        seasonOptions.forEach { season ->
+                                            DropdownMenuItem(
+                                                text = { Text("Season $season", color = Brand.Ink) },
+                                                trailingIcon = {
+                                                    if (season == selectedSeason) Text("✓", color = Brand.Mint, fontWeight = FontWeight.Black)
+                                                },
+                                                onClick = {
+                                                    selectedSeason = season
+                                                    seasonMenuOpen = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                                selectedSeason?.let { season ->
+                                    Spacer(Modifier.width(10.dp))
+                                    PunchIconButton(
+                                        onClick = { noteTarget = "season" to (season to 0) },
+                                        color = Brand.Amber
+                                    ) {
+                                        Icon(Icons.AutoMirrored.Filled.Comment, contentDescription = "Season note", tint = Brand.OnAccent)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    items(selectedEpisodes) { ep ->
+                        val isWatched = watchedIds.contains(ep.id.toString())
+                        PunchCard(
+                            onClick = {
+                                if (isWatched) {
+                                    vm.launchApp { vm.repo.unmarkEpisode(group.id, uid, ep.id) }
+                                } else {
+                                    val previous = watched
+                                        .filter { it.season < ep.season || (it.season == ep.season && it.number < ep.number) }
+                                        .maxByOrNull { it.season * 10000 + it.number }
+                                    if (previous != null) {
+                                        rangeTarget = ep
+                                    } else {
+                                        vm.launchApp {
+                                            vm.repo.markEpisodes(group.id, uid, vm.myName, show, listOf(ep), "marked ${epLabel(ep.season, ep.number)}")
+                                        }
+                                    }
+                                }
+                            },
+                            accent = if (isWatched) Brand.Mint else Brand.Border
+                        ) {
+                            Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    Modifier.size(30.dp).clip(CircleShape)
+                                        .background(if (isWatched) Brand.Mint else Brand.Surface)
+                                        .border(2.dp, if (isWatched) Brand.Stroke else Brand.Border, CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (isWatched) Icon(Icons.Default.Check, contentDescription = null, tint = Brand.OnAccent, modifier = Modifier.size(18.dp))
+                                }
+                                Spacer(Modifier.width(12.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        "${epLabel(ep.season, ep.number)}  ${ep.name}",
+                                        fontSize = 14.sp,
+                                        color = Brand.Ink,
+                                        fontWeight = if (isWatched) FontWeight.Normal else FontWeight.Bold
+                                    )
+                                    if (isWatched) Text("WATCHED", fontSize = 10.sp, fontWeight = FontWeight.Black, color = Brand.Mint)
+                                }
+                                PunchIconButton(
+                                    onClick = { noteTarget = "episode" to (ep.season to ep.number) },
+                                    color = Brand.Surface,
+                                    modifier = Modifier.size(42.dp)
+                                ) {
+                                    Icon(Icons.AutoMirrored.Filled.Comment, contentDescription = "Episode note", tint = Brand.Ink, modifier = Modifier.size(18.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    rangeTarget?.let { target ->
+        val previous = watched
+            .filter { it.season < target.season || (it.season == target.season && it.number < target.number) }
+            .maxByOrNull { it.season * 10000 + it.number }
+        val fromIndex = previous?.let { p -> episodes.indexOfFirst { it.id.toString() == p.id } }
+        val toIndex = episodes.indexOfFirst { it.id == target.id }
+        val range = if (fromIndex != null && toIndex > fromIndex) episodes.subList(fromIndex + 1, toIndex + 1) else listOf(target)
+        val labelStart = range.firstOrNull()?.let { epLabel(it.season, it.number) } ?: ""
+        val labelEnd = range.lastOrNull()?.let { epLabel(it.season, it.number) } ?: ""
+        val summary = if (range.size == 1) "marked $labelEnd" else "marked $labelStart–$labelEnd"
+
+        AlertDialog(
+            onDismissRequest = { rangeTarget = null },
+            containerColor = Brand.Surface,
+            shape = RoundedCornerShape(26.dp),
+            title = { Text("Mark episodes?", color = Brand.Ink, fontWeight = FontWeight.Bold) },
+            text = { Text("Mark $summary (${range.size} episode${if (range.size == 1) "" else "s"})? Everyone in the group will be notified.", color = Brand.Muted) },
+            confirmButton = {
+                PunchButton(
+                    text = "Mark all",
+                    modifier = Modifier.width(120.dp),
+                    color = Brand.Mint,
+                    contentColor = Brand.OnAccent,
+                    onClick = {
+                        vm.launchApp { vm.repo.markEpisodes(group.id, uid, vm.myName, show, range, summary) }
+                        rangeTarget = null
+                    }
+                )
+            },
+            dismissButton = {
+                PunchButton("Cancel", { rangeTarget = null }, Modifier.width(120.dp), color = Brand.InkSoft, contentColor = Brand.Ink, borderColor = Brand.Border)
+            }
+        )
+    }
+
+    noteTarget?.let { target ->
+        val (scopeName, numbers) = target
+        val label = when (scopeName) {
+            "season" -> "Season ${numbers.first}"
+            "episode" -> epLabel(numbers.first, numbers.second)
+            else -> show.name
+        }
+        NoteDialog(
+            label = label,
+            onDismiss = { noteTarget = null }
+        ) { text, isPublic ->
+            vm.launchApp {
+                vm.repo.addNote(
+                    group.id, uid, vm.myName, show, scopeName,
+                    numbers.first, numbers.second, text, isPublic
+                )
+                noteTarget = null
+            }
+        }
+    }
+
+    if (confirmRewatch) {
+        AlertDialog(
+            onDismissRequest = { confirmRewatch = false },
+            containerColor = Brand.Surface,
+            shape = RoundedCornerShape(26.dp),
+            title = { Text("Watch again?", color = Brand.Ink, fontWeight = FontWeight.Bold) },
+            text = { Text("This clears your watched markers for this show so you can track a rewatch. Group activity and notes stay.", color = Brand.Muted) },
+            confirmButton = {
+                PunchButton(
+                    text = "Reset",
+                    modifier = Modifier.width(120.dp),
+                    color = Brand.Amber,
+                    contentColor = Brand.OnAccent,
+                    onClick = {
+                        confirmRewatch = false
+                        vm.launchApp {
+                            runCatching {
+                                vm.repo.resetShowProgress(group.id, uid, episodes.map { it.id.toString() })
+                            }.onFailure { if (!it.isCancellation()) vm.message = "Could not reset progress: ${it.localizedMessage}" }
+                        }
+                    }
+                )
+            },
+            dismissButton = {
+                PunchButton(
+                    text = "Cancel",
+                    modifier = Modifier.width(120.dp),
+                    color = Brand.InkSoft,
+                    contentColor = Brand.Ink,
+                    borderColor = Brand.Border,
+                    onClick = { confirmRewatch = false }
+                )
+            }
+        )
+    }
+
+    if (confirmRemove) {
+        AlertDialog(
+            onDismissRequest = { confirmRemove = false },
+            containerColor = Brand.Surface,
+            shape = RoundedCornerShape(26.dp),
+            title = { Text("Remove show?", color = Brand.Ink, fontWeight = FontWeight.Bold) },
+            text = { Text("Remove \"${show.name}\" from this circle? Its notes and activity stay in the history.", color = Brand.Muted) },
+            confirmButton = {
+                PunchButton(
+                    text = "Remove",
+                    modifier = Modifier.width(120.dp),
+                    color = Brand.Coral,
+                    contentColor = Brand.OnAccent,
+                    onClick = {
+                        confirmRemove = false
+                        vm.launchApp {
+                            runCatching { vm.repo.removeShow(group.id, show.id) }
+                                .onSuccess { go(Screen.GroupDetail(group)) }
+                                .onFailure { if (!it.isCancellation()) vm.message = "Could not remove show: ${it.localizedMessage}" }
+                        }
+                    }
+                )
+            },
+            dismissButton = {
+                PunchButton(
+                    text = "Cancel",
+                    modifier = Modifier.width(120.dp),
+                    color = Brand.InkSoft,
+                    contentColor = Brand.Ink,
+                    borderColor = Brand.Border,
+                    onClick = { confirmRemove = false }
+                )
+            }
+        )
+    }
+}
+
+@Composable
+fun NoteDialog(label: String, onDismiss: () -> Unit, onSave: (String, Boolean) -> Unit) {
+    var text by remember { mutableStateOf("") }
+    var isPublic by remember { mutableStateOf(true) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Brand.Surface,
+        shape = RoundedCornerShape(26.dp),
+        title = { Text("Note about $label", color = Brand.Ink, fontWeight = FontWeight.Bold) },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    label = { Text("Your note") },
+                    minLines = 3,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = wtFieldColors()
+                )
+                Spacer(Modifier.height(12.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Switch(checked = isPublic, onCheckedChange = { isPublic = it })
+                    Spacer(Modifier.width(8.dp))
+                    Text(if (isPublic) "Visible to the group" else "Only visible to me", color = Brand.Ink)
+                }
+            }
+        },
+        confirmButton = {
+            PunchButton(
+                text = "Save",
+                enabled = text.isNotBlank(),
+                modifier = Modifier.width(110.dp),
+                color = Brand.Blue,
+                onClick = { if (text.isNotBlank()) onSave(text.trim(), isPublic) }
+            )
+        },
+        dismissButton = {
+            PunchButton("Cancel", onDismiss, Modifier.width(110.dp), color = Brand.InkSoft, contentColor = Brand.Ink, borderColor = Brand.Border)
+        }
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AddShowScreen(vm: MainViewModel, group: Group, onBack: () -> Unit) {
+    var query by remember { mutableStateOf("") }
+    var results by remember { mutableStateOf<List<TvShow>>(TvmazeApi.cachedSearch("") ?: emptyList()) }
+    var searching by remember { mutableStateOf(false) }
+    var hasSearched by remember { mutableStateOf(false) }
+
+    LaunchedEffect(query) {
+        val q = query.trim()
+        if (q.length < 2) {
+            results = emptyList()
+            searching = false
+            hasSearched = false
+            return@LaunchedEffect
+        }
+        TvmazeApi.cachedSearch(q)?.let {
+            results = it
+            searching = false
+            hasSearched = true
+            return@LaunchedEffect
+        }
+        results = emptyList()
+        searching = true
+        delay(220)
+        try {
+            results = TvmazeApi.search(q)
+            hasSearched = true
+        } catch (e: Exception) {
+            if (!e.isCancellation()) vm.message = "Search failed: ${e.localizedMessage}"
+        } finally {
+            searching = false
+        }
+    }
+
+    Scaffold(
+        containerColor = Brand.Paper,
+        topBar = {
+            TopAppBar(
+                title = { Text("ADD A SHOW", style = MaterialTheme.typography.labelLarge, color = Brand.Ink) },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Brand.Paper)
+            )
+        }
+    ) { padding ->
+        DecorBackground {
+            Column(modifier = Modifier.padding(padding).padding(20.dp).fillMaxSize()) {
+                ScreenHeader(
+                    step = "03 / ADD TO CIRCLE",
+                    title = "Find a show.",
+                    subtitle = "Search once, add it, and the whole group sees it.",
+                    accent = Brand.Mint
+                )
+                Spacer(Modifier.height(16.dp))
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    label = { Text("Search TVMaze") },
+                    placeholder = { Text("Try a show title") },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Brand.Blue) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = wtFieldColors()
+                )
+                Spacer(Modifier.height(14.dp))
+                when {
+                    searching -> LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        items(5) { ShowSkeletonRow() }
+                    }
+                    results.isEmpty() -> {
+                        SoftCard(modifier = Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(20.dp)) {
+                                StatusPill(if (!hasSearched) "READY WHEN YOU ARE" else "NO MATCHES", Brand.Amber)
+                                Spacer(Modifier.height(12.dp))
+                                Text(
+                                    if (!hasSearched) "Type at least two letters." else "Try a shorter or more exact title.",
+                                    color = Brand.Ink
+                                )
+                            }
+                        }
+                    }
+                    else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        itemsIndexed(results) { index, show ->
+                            AnimatedEnter(index * 40) {
+                                PunchCard(
+                                    onClick = {
+                                        vm.launchApp {
+                                            vm.repo.addShow(group.id, show, vm.uid!!)
+                                            onBack()
+                                        }
+                                    },
+                                    accent = listOf(Brand.Blue, Brand.Mint, Brand.Coral, Brand.Amber)[index % 4]
+                                ) {
+                                    Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        ShowThumb(show.image?.medium.orEmpty(), Brand.Mint)
+                                        Spacer(Modifier.width(14.dp))
+                                        Column(Modifier.weight(1f)) {
+                                            Text(show.name, fontWeight = FontWeight.Bold, color = Brand.Ink)
+                                            Spacer(Modifier.height(3.dp))
+                                            Text("Tap to add to ${group.name}", fontSize = 11.sp, color = Brand.Muted)
+                                        }
+                                        PunchIconButton(
+                                            onClick = {
+                                                vm.launchApp {
+                                                    vm.repo.addShow(group.id, show, vm.uid!!)
+                                                    onBack()
+                                                }
+                                            },
+                                            color = Brand.Mint
+                                        ) {
+                                            Icon(Icons.Default.Add, contentDescription = "Add", tint = Brand.OnAccent)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(16.dp))
+                PunchButton(
+                    text = "Back to circle",
+                    onClick = onBack,
+                    modifier = Modifier.fillMaxWidth(),
+                    color = Brand.Surface,
+                    contentColor = Brand.Ink
+                )
+            }
+        }
+    }
+}
+
+
+
+================================================
+FILE: app/src/main/java/com/dionlobo/watchtogether/TvmazeApi.kt
+================================================
+package com.dionlobo.watchtogether
+
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import retrofit2.Retrofit
+import retrofit2.converter.gson.GsonConverterFactory
+import retrofit2.http.GET
+import retrofit2.http.Path
+import retrofit2.http.Query
+import java.util.LinkedHashMap
+
+data class TvImage(val medium: String? = null, val original: String? = null)
+
+data class TvShow(
+    val id: Int = 0,
+    val name: String = "",
+    val image: TvImage? = null,
+    val summary: String? = null
+)
+
+data class TvSearchResult(val show: TvShow = TvShow())
+
+data class TvEpisodeDto(
+    val id: Int = 0,
+    val name: String? = null,
+    val season: Int? = null,
+    val number: Int? = null,
+    val airdate: String? = null,
+    val image: TvImage? = null
+)
+
+interface TvmazeService {
+    @GET("search/shows")
+    suspend fun search(@Query("q") query: String): List<TvSearchResult>
+
+    @GET("shows/{id}/episodes")
+    suspend fun episodes(@Path("id") showId: Int): List<TvEpisodeDto>
+}
+
+object TvmazeApi {
+    private val service: TvmazeService = Retrofit.Builder()
+        .baseUrl("https://api.tvmaze.com/")
+        .addConverterFactory(GsonConverterFactory.create())
+        .build()
+        .create(TvmazeService::class.java)
+
+    private val searchCache = LinkedHashMap<String, List<TvShow>>()
+    private val episodeCache = LinkedHashMap<Int, List<TvEpisode>>()
+
+    private fun <K, V> cachePut(cache: LinkedHashMap<K, V>, key: K, value: V, max: Int) {
+        synchronized(cache) {
+            while (cache.size >= max) cache.remove(cache.keys.first())
+            cache[key] = value
+        }
+    }
+
+    fun cachedSearch(query: String): List<TvShow>? = synchronized(searchCache) {
+        searchCache[query.trim().lowercase()]
+    }
+
+    suspend fun search(query: String): List<TvShow> = withContext(Dispatchers.IO) {
+        val key = query.trim().lowercase()
+        synchronized(searchCache) { searchCache[key] }?.let { return@withContext it }
+        val result = service.search(query).map { it.show }.filter { it.id != 0 }
+        cachePut(searchCache, key, result, 40)
+        result
+    }
+
+    fun cachedEpisodes(showId: Int): List<TvEpisode>? = synchronized(episodeCache) {
+        episodeCache[showId]
+    }
+
+    suspend fun episodes(showId: Int): List<TvEpisode> = withContext(Dispatchers.IO) {
+        synchronized(episodeCache) { episodeCache[showId] }?.let { return@withContext it }
+        val result = service.episodes(showId).map {
+            TvEpisode(
+                id = it.id,
+                name = it.name ?: "Episode ${it.number ?: 0}",
+                season = it.season ?: 0,
+                number = it.number ?: 0,
+                airdate = it.airdate ?: "",
+                imageUrl = it.image?.medium ?: ""
+            )
+        }.sortedWith(compareBy({ it.season }, { it.number }))
+        cachePut(episodeCache, showId, result, 24)
+        result
+    }
+}
+
+
+
+================================================
+FILE: app/src/main/res/drawable/ic_launcher_foreground.xml
+================================================
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M34,28h40a8,8 0,0 1,8 8v36a8,8 0,0 1,-8 8H34a8,8 0,0 1,-8 -8V36a8,8 0,0 1,8 -8zM38,42h32v5H38zM38,54h24v5H38z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M62,68l8,8 14,-16 -5,-5 -9,11 -4,-4z" />
+</vector>
+
+
+
+================================================
+FILE: app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
+================================================
+<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ic_launcher_background" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>
+
+
+
+================================================
+FILE: app/src/main/res/values/colors.xml
+================================================
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ic_launcher_background">#2F6F5E</color>
+</resources>
+
+
+
+================================================
+FILE: app/src/main/res/values/strings.xml
+================================================
+<resources>
+    <string name="app_name">TwinWatch</string>
+</resources>
+
+
+
+================================================
+FILE: app/src/main/res/values/styles.xml
+================================================
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="WatchTogetherTheme" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>
+
+
+
+================================================
+FILE: app/src/main/res/xml/backup_rules.xml
+================================================
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+</full-backup-content>
+
+
+
+================================================
+FILE: app/src/main/res/xml/data_extraction_rules.xml
+================================================
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="FirebaseAuth.xml" />
+    </cloud-backup>
+</data-extraction-rules>
+
+
+
+================================================
+FILE: icon-concepts/README.md
+================================================
+# Watch Together — app icon concepts
+
+Six vector concepts for the app icon. Each has a 512x512 PNG and editable SVG. The contact sheet is also exported as PNG and PDF.
+
+- `01-dual-play` — two overlapping play marks: watching as a pair/group.
+- `02-shared-frame` — shared screen with two members and a play action.
+- `03-orbit-play` — central play core with orbiting friends/activity.
+- `04-episode-stack` — stacked episode cards with a checkmark for watched episodes.
+- `05-together-w` — abstract W monogram built from two play paths.
+- `06-watched-check` — play button transformed by a watched confirmation check.
+
+Palette: Ink #12161C, Paper #F5F0E6, Amber #FFB454, Mint #6EE7C3, Coral #FF806B.
+
+
+
+================================================
+FILE: icon-concepts/cinematic-studio/README.md
+================================================
+# Cinematic Studio icon concepts
+
+Six new app-icon directions built to match the Cinematic Studio UI revamp: charcoal, warm paper, amber, mint, and coral with film/editorial motifs.
+
+- `01-marquee-play` — filmstrip framing around a clean play disc.
+- `02-clapper-play` — clapperboard slash with a play card.
+- `03-spotlight` — spotlight beam revealing the play mark.
+- `04-reel` — film reel with play negative space.
+- `05-split-frame` — two-tone screen split for “together”.
+- `06-cue-mark` — editorial corner cues around a play mark.

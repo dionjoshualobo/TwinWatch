@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "WatchTogether"
+rootProject.name = "TwinWatch"
 include(":app")
