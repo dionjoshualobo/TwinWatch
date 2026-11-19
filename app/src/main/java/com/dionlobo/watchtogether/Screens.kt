@@ -19,10 +19,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Comment
 import androidx.compose.material.icons.filled.Add
@@ -32,6 +34,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -64,6 +67,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.text.HtmlCompat
 import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -72,6 +76,18 @@ private fun epLabel(season: Int, number: Int) =
     "S${season.toString().padStart(2, '0')}E${number.toString().padStart(2, '0')}"
 
 private data class MarkTarget(val episode: TvEpisode, val earlierUnwatched: List<TvEpisode>)
+
+private data class DetailsTarget(
+    val title: String,
+    val subtitle: String,
+    val imageUrl: String,
+    val summary: String,
+    val meta: String = "",
+    val showId: Int? = null
+)
+
+private fun plainText(html: String): String =
+    HtmlCompat.fromHtml(html, HtmlCompat.FROM_HTML_MODE_LEGACY).toString().trim()
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -87,6 +103,7 @@ fun GroupDetailScreen(vm: MainViewModel, group: Group, go: (Screen) -> Unit) {
     }.collectAsState(emptyMap())
     var tab by remember { mutableStateOf(0) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var detailsTarget by remember { mutableStateOf<DetailsTarget?>(null) }
     val context = LocalContext.current
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
@@ -159,6 +176,22 @@ fun GroupDetailScreen(vm: MainViewModel, group: Group, go: (Screen) -> Unit) {
                                             Text(show.name, style = MaterialTheme.typography.titleLarge, color = Brand.Ink)
                                             Spacer(Modifier.height(5.dp))
                                             addedByText(show, members)
+                                        }
+                                        PunchIconButton(
+                                            onClick = {
+                                                detailsTarget = DetailsTarget(
+                                                    title = show.name,
+                                                    subtitle = "SHOW DETAILS",
+                                                    imageUrl = show.imageUrl,
+                                                    summary = show.summary,
+                                                    meta = "TVMaze",
+                                                    showId = show.id.toIntOrNull()
+                                                )
+                                            },
+                                            color = Brand.Surface,
+                                            modifier = Modifier.size(42.dp)
+                                        ) {
+                                            Icon(Icons.Default.Visibility, contentDescription = "Show details", tint = Brand.Ink, modifier = Modifier.size(18.dp))
                                         }
                                     }
                                 }
@@ -341,6 +374,8 @@ fun GroupDetailScreen(vm: MainViewModel, group: Group, go: (Screen) -> Unit) {
             }
         )
     }
+
+    detailsTarget?.let { DetailsDialog(it) { detailsTarget = null } }
 }
 
 @Composable
@@ -649,6 +684,7 @@ fun ShowDetailScreen(vm: MainViewModel, group: Group, show: ShowEntry, go: (Scre
     var loading by remember(show.id) { mutableStateOf(cachedEpisodes == null) }
     var rangeTarget by remember { mutableStateOf<MarkTarget?>(null) }
     var noteTarget by remember { mutableStateOf<Pair<String, Pair<Int, Int>>?>(null) }
+    var detailsTarget by remember { mutableStateOf<DetailsTarget?>(null) }
     var confirmRemove by remember { mutableStateOf(false) }
     var confirmRewatch by remember { mutableStateOf(false) }
     var selectedSeason by remember(show.id) { mutableStateOf<Int?>(null) }
@@ -679,6 +715,21 @@ fun ShowDetailScreen(vm: MainViewModel, group: Group, show: ShowEntry, go: (Scre
             TopAppBar(
                 title = { Text(show.name.uppercase(), style = MaterialTheme.typography.labelLarge, color = Brand.Ink) },
                 actions = {
+                    PunchIconButton(
+                        onClick = {
+                            detailsTarget = DetailsTarget(
+                                title = show.name,
+                                subtitle = "SHOW DETAILS",
+                                imageUrl = show.imageUrl,
+                                summary = show.summary,
+                                meta = "TVMaze",
+                                showId = show.id.toIntOrNull()
+                            )
+                        },
+                        color = Brand.Surface
+                    ) {
+                        Icon(Icons.Default.Visibility, contentDescription = "Show details", tint = Brand.Ink)
+                    }
                     if (show.addedBy == uid || group.createdBy == uid) {
                         PunchIconButton(onClick = { confirmRemove = true }, color = Brand.Coral, contentColor = Brand.OnAccent) {
                             Icon(Icons.Default.Delete, contentDescription = "Remove show", tint = Brand.OnAccent)
@@ -864,13 +915,29 @@ fun ShowDetailScreen(vm: MainViewModel, group: Group, show: ShowEntry, go: (Scre
                                     )
                                     if (isWatched) Text("WATCHED", fontSize = 10.sp, fontWeight = FontWeight.Black, color = Brand.Mint)
                                 }
-                                PunchIconButton(
-                                    onClick = { noteTarget = "episode" to (ep.season to ep.number) },
-                                    color = Brand.Surface,
-                                    modifier = Modifier.size(42.dp)
-                                ) {
-                                    Icon(Icons.AutoMirrored.Filled.Comment, contentDescription = "Episode note", tint = Brand.Ink, modifier = Modifier.size(18.dp))
-                                }
+                                 PunchIconButton(
+                                     onClick = {
+                                         detailsTarget = DetailsTarget(
+                                             title = "${epLabel(ep.season, ep.number)}  ${ep.name}",
+                                             subtitle = "EPISODE DETAILS",
+                                             imageUrl = ep.imageOriginalUrl.ifBlank { ep.imageUrl },
+                                             summary = ep.summary,
+                                             meta = if (ep.airdate.isNotBlank()) "Aired ${ep.airdate}" else "TVMaze"
+                                         )
+                                     },
+                                     color = Brand.Surface,
+                                     modifier = Modifier.size(42.dp)
+                                 ) {
+                                     Icon(Icons.Default.Visibility, contentDescription = "Episode details", tint = Brand.Ink, modifier = Modifier.size(18.dp))
+                                 }
+                                 Spacer(Modifier.width(6.dp))
+                                 PunchIconButton(
+                                     onClick = { noteTarget = "episode" to (ep.season to ep.number) },
+                                     color = Brand.Surface,
+                                     modifier = Modifier.size(42.dp)
+                                 ) {
+                                     Icon(Icons.AutoMirrored.Filled.Comment, contentDescription = "Episode note", tint = Brand.Ink, modifier = Modifier.size(18.dp))
+                                 }
                             }
                         }
                     }
@@ -1026,6 +1093,8 @@ fun ShowDetailScreen(vm: MainViewModel, group: Group, show: ShowEntry, go: (Scre
             }
         )
     }
+
+    detailsTarget?.let { DetailsDialog(it) { detailsTarget = null } }
 }
 
 @Composable
@@ -1066,6 +1135,69 @@ fun NoteDialog(label: String, onDismiss: () -> Unit, onSave: (String, Boolean) -
         },
         dismissButton = {
             PunchButton("Cancel", onDismiss, Modifier.width(110.dp), color = Brand.InkSoft, contentColor = Brand.Ink, borderColor = Brand.Border)
+        }
+    )
+}
+
+@Composable
+private fun DetailsDialog(target: DetailsTarget, onDismiss: () -> Unit) {
+    var summary by remember(target) { mutableStateOf(target.summary) }
+    var imageUrl by remember(target) { mutableStateOf(target.imageUrl) }
+
+    LaunchedEffect(target) {
+        val showId = target.showId ?: return@LaunchedEffect
+        if (summary.isNotBlank() && imageUrl.isNotBlank()) return@LaunchedEffect
+        runCatching { TvmazeApi.cachedShow(showId) ?: TvmazeApi.show(showId) }
+            .onSuccess { fetched ->
+                if (summary.isBlank()) summary = fetched.summary.orEmpty()
+                if (imageUrl.isBlank()) imageUrl = fetched.image?.medium ?: fetched.image?.original.orEmpty()
+            }
+    }
+
+    val body = plainText(summary)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Brand.Surface,
+        shape = RoundedCornerShape(26.dp),
+        title = {
+            Column {
+                Text(target.subtitle, fontSize = 10.sp, fontWeight = FontWeight.Black, color = Brand.Blue, letterSpacing = 1.sp)
+                Spacer(Modifier.height(4.dp))
+                Text(target.title, color = Brand.Ink, fontWeight = FontWeight.Bold)
+            }
+        },
+        text = {
+            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+                if (imageUrl.isNotBlank()) {
+                    AsyncImage(
+                        model = imageUrl,
+                        contentDescription = target.title,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxWidth().height(180.dp).clip(RoundedCornerShape(18.dp)).background(Brand.PaperDim)
+                    )
+                    Spacer(Modifier.height(14.dp))
+                } else {
+                    Box(
+                        Modifier.fillMaxWidth().height(120.dp).clip(RoundedCornerShape(18.dp)).background(Brand.PaperDim),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("NO IMAGE FROM TVMAZE", fontSize = 10.sp, fontWeight = FontWeight.Black, color = Brand.Muted, letterSpacing = 1.sp)
+                    }
+                    Spacer(Modifier.height(14.dp))
+                }
+                if (target.meta.isNotBlank()) {
+                    Text(target.meta, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Brand.Muted)
+                    Spacer(Modifier.height(8.dp))
+                }
+                Text(
+                    if (body.isNotBlank()) body else "TVMaze does not provide a description for this.",
+                    color = Brand.Ink,
+                    style = MaterialTheme.typography.bodyLarge
+                )
+            }
+        },
+        confirmButton = {
+            PunchButton("Close", onDismiss, Modifier.width(110.dp), color = Brand.Blue, contentColor = Brand.OnPrimary)
         }
     )
 }
