@@ -43,6 +43,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -114,6 +115,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        vm.retryUpdateAfterPermission()
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         readIntent(intent)
@@ -179,6 +185,100 @@ fun AppRoot(vm: MainViewModel, startGroupId: String?) {
             }
         )
     }
+
+    if (vm.message == null) {
+        vm.updateAvailable?.let { update -> UpdateDialog(vm, update) }
+    }
+}
+
+@Composable
+private fun UpdateDialog(vm: MainViewModel, update: AppUpdate) {
+    AlertDialog(
+        onDismissRequest = { vm.dismissUpdate() },
+        containerColor = Brand.Surface,
+        shape = RoundedCornerShape(24.dp),
+        title = {
+            Column {
+                Text(
+                    "UPDATE AVAILABLE",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Black,
+                    color = Brand.Amber,
+                    letterSpacing = 1.sp
+                )
+                Spacer(Modifier.height(6.dp))
+                Text("TwinWatch ${update.versionName}", color = Brand.Ink, fontWeight = FontWeight.Bold)
+            }
+        },
+        text = {
+            Column(Modifier.fillMaxWidth()) {
+                if (update.notes.isNotBlank()) {
+                    Text(update.notes, color = Brand.Muted, fontSize = 13.sp)
+                    Spacer(Modifier.height(12.dp))
+                }
+                when {
+                    vm.updateNeedsPermission -> Text(
+                        "Allow TwinWatch to install apps in Android settings. Come back and the update will continue automatically.",
+                        color = Brand.Ink,
+                        fontSize = 13.sp
+                    )
+                    vm.updateDownloading -> {
+                        Text("Downloading ${vm.updateProgress}%", color = Brand.Muted, fontSize = 12.sp)
+                        Spacer(Modifier.height(8.dp))
+                        LinearProgressIndicator(
+                            progress = { vm.updateProgress / 100f },
+                            modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(8.dp)),
+                            color = Brand.Mint,
+                            trackColor = Brand.PaperDim
+                        )
+                    }
+                    vm.updateReady != null -> Text("Ready to install.", color = Brand.Ink, fontSize = 13.sp)
+                }
+            }
+        },
+        confirmButton = {
+            when {
+                vm.updateNeedsPermission -> PunchButton(
+                    "Open settings",
+                    { vm.openInstallSettings() },
+                    Modifier.width(140.dp),
+                    color = Brand.Blue
+                )
+                vm.updateDownloading -> PunchButton(
+                    "Downloading",
+                    { },
+                    Modifier.width(140.dp),
+                    enabled = false,
+                    color = Brand.InkSoft,
+                    contentColor = Brand.Ink,
+                    borderColor = Brand.Border
+                )
+                vm.updateReady != null -> PunchButton(
+                    "Install",
+                    { vm.installUpdate() },
+                    Modifier.width(110.dp),
+                    color = Brand.Mint,
+                    contentColor = Brand.OnAccent
+                )
+                else -> PunchButton(
+                    "Download & install",
+                    { vm.startUpdate() },
+                    Modifier.width(180.dp),
+                    color = Brand.Blue
+                )
+            }
+        },
+        dismissButton = {
+            PunchButton(
+                "Not now",
+                { vm.dismissUpdate() },
+                Modifier.width(110.dp),
+                color = Brand.InkSoft,
+                contentColor = Brand.Ink,
+                borderColor = Brand.Border
+            )
+        }
+    )
 }
 
 @Composable
@@ -614,6 +714,25 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
                         Switch(
                             checked = vm.darkTheme,
                             onCheckedChange = { vm.setDarkMode(it) }
+                        )
+                    }
+                }
+                Spacer(Modifier.height(14.dp))
+                SoftCard(modifier = Modifier.fillMaxWidth()) {
+                    Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("APP UPDATES", color = Brand.Amber, fontSize = 11.sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
+                            Spacer(Modifier.height(6.dp))
+                            Text("Version ${vm.appVersion}", color = Brand.Muted, fontSize = 13.sp)
+                        }
+                        PunchButton(
+                            text = if (vm.updateChecking) "Checking" else "Check",
+                            onClick = { vm.checkForUpdate(force = true) },
+                            modifier = Modifier.width(104.dp),
+                            enabled = !vm.updateChecking && !vm.updateDownloading,
+                            color = Brand.Surface,
+                            contentColor = Brand.Ink,
+                            borderColor = Brand.Border
                         )
                     }
                 }

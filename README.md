@@ -105,9 +105,13 @@ If you change the application id in `app/build.gradle.kts`, you must also regist
 
 ## Notifications
 
-The app registers for Firebase Cloud Messaging topics and can display incoming FCM messages. It does not include a backend that sends group notifications by itself. Activity is always written to Firestore and shown in the circle's Activity tab.
+The app registers for Firebase Cloud Messaging topics named `g_<circleId>` and can display incoming FCM messages. Activity is always written to Firestore and shown in the circle's Activity tab.
 
-If you self-host and want push notifications, you need your own server or Admin SDK process to send FCM messages to the topic names used by the app.
+New activity events are marked with `fcmPending: true`. The included GitHub Actions workflow runs every five minutes, sends one notification per pending event with the Firebase Admin SDK, and marks the event complete. To use it in a fork, add a Firebase service account JSON as the `FIREBASE_SERVICE_ACCOUNT` repository secret. The optional Cloud Function under `functions/` uses the same notification writer if you prefer deploying a server instead.
+
+## App updates
+
+The app checks the latest GitHub release on launch and exposes a manual check in Settings → App updates. Publishing a release with an `.apk` asset and a higher tag version is enough for installed apps to offer a download and Android install prompt. Silent installation is not used.
 
 ## Project layout
 
@@ -122,9 +126,12 @@ app/src/main/java/com/dionlobo/watchtogether/
   Design.kt         Theme, palette, buttons, cards, tabs
   Notifications.kt  FCM handling
   Reminders.kt      WorkManager local reminders
+  Updater.kt        GitHub release check, APK download, install prompt
 
-app/google-services.json  Firebase configuration and API key
-firestore.rules           Firestore access control rules
+app/google-services.json       Firebase configuration and API key
+firestore.rules                Firestore access control rules
+.github/workflows/             GitHub Actions notification job
+functions/                     Optional Cloud Function sender
 ```
 
 ## Ground rules for forks

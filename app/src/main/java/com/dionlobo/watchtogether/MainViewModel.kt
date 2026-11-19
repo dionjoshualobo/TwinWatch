@@ -2,6 +2,7 @@ package com.dionlobo.watchtogether
 
 import android.app.Application
 import android.content.Context
+import android.content.Intent
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -9,6 +10,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import java.io.File
 
 internal fun Throwable.isCancellation(): Boolean {
     var cause: Throwable? = this
@@ -38,6 +40,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var darkTheme by mutableStateOf(prefs.getBoolean("dark_theme", false))
         private set
+    val appVersion: String = AppUpdater.currentVersion(app)
+    var updateChecking by mutableStateOf(false)
+        private set
+    var updateAvailable by mutableStateOf<AppUpdate?>(null)
+        private set
+    var updateDownloading by mutableStateOf(false)
+        private set
+    var updateProgress by mutableStateOf(0)
+        private set
+    var updateReady by mutableStateOf<File?>(null)
+        private set
+    var updateNeedsPermission by mutableStateOf(false)
+        private set
 
     init {
         viewModelScope.launch {
@@ -50,6 +65,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 ready = true
                 startActivityWatcher(id)
                 ReminderScheduler.schedule(getApplication())
+                checkForUpdate(silent = true)
             } catch (e: Exception) {
                 if (!e.isCancellation()) message = e.localizedMessage ?: "Could not sign in"
             }
@@ -145,6 +161,99 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         } catch (e: Exception) {
             if (!e.isCancellation()) message = e.localizedMessage ?: "Something went wrong"
         }
+    }
+
+    fun checkForUpdate(force: Boolean = false, silent: Boolean = false) {
+        viewModelScope.launch {
+            if (updateDownloading) return@launch
+            if (!force && !AppUpdater.shouldCheck(getApplication())) return@launch
+            updateChecking = true
+            AppUpdater.markChecked(getApplication())
+            try {
+                val next = AppUpdater.latestUpdate(getApplication())
+                if (next != null) {
+                    if (next.versionName != updateAvailable?.versionName) updateReady = null
+                    updateAvailable = next
+                } else {
+                    updateAvailable = null
+                    updateReady = null
+                    if (!silent) message = "You're up to date"
+                }
+            } catch (e: Exception) {
+                if (!e.isCancellation() && !silent) {
+                    message = "Could not check for updates: ${e.localizedMessage}"
+                }
+            } finally {
+                updateChecking = false
+            }
+        }
+    }
+
+    fun startUpdate() {
+        val update = updateAvailable ?: return
+        if (updateReady != null) {
+            installUpdate()
+            return
+        }
+        if (!AppUpdater.canInstall(getApplication())) {
+            updateNeedsPermission = true
+            openInstallSettings()
+            return
+        }
+        viewModelScope.launch {
+            updateDownloading = true
+            updateProgress = 0
+            try {
+                val file = AppUpdater.download(getApplication(), update) { updateProgress = it }
+                if (updateAvailable?.versionName == update.versionName) {
+                    updateReady = file
+                    installUpdate()
+                }
+            } catch (e: Exception) {
+                if (!e.isCancellation()) message = "Could not download update: ${e.localizedMessage}"
+            } finally {
+                updateDownloading = false
+            }
+        }
+    }
+
+    fun installUpdate() {
+        val file = updateReady ?: return
+        if (!AppUpdater.canInstall(getApplication())) {
+            updateNeedsPermission = true
+            openInstallSettings()
+            return
+        }
+        try {
+            getApplication<Application>().startActivity(AppUpdater.installIntent(getApplication(), file))
+            updateNeedsPermission = false
+        } catch (e: Exception) {
+            message = "Could not open installer: ${e.localizedMessage}"
+        }
+    }
+
+    fun openInstallSettings() {
+        try {
+            getApplication<Application>().startActivity(
+                AppUpdater.unknownSourcesIntent(getApplication())
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        } catch (e: Exception) {
+            message = "Could not open install settings: ${e.localizedMessage}"
+        }
+    }
+
+    fun retryUpdateAfterPermission() {
+        if (!updateNeedsPermission || updateAvailable == null) return
+        if (AppUpdater.canInstall(getApplication())) {
+            updateNeedsPermission = false
+            startUpdate()
+        }
+    }
+
+    fun dismissUpdate() {
+        updateAvailable = null
+        updateNeedsPermission = false
     }
 
     fun clearMessage() {
