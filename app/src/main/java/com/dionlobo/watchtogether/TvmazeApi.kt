@@ -1,10 +1,13 @@
 package com.dionlobo.watchtogether
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.GET
 import retrofit2.http.Path
 import retrofit2.http.Query
+import java.util.LinkedHashMap
 
 data class TvImage(val medium: String? = null, val original: String? = null)
 
@@ -41,11 +44,35 @@ object TvmazeApi {
         .build()
         .create(TvmazeService::class.java)
 
-    suspend fun search(query: String): List<TvShow> =
-        service.search(query).map { it.show }.filter { it.id != 0 }
+    private val searchCache = LinkedHashMap<String, List<TvShow>>()
+    private val episodeCache = LinkedHashMap<Int, List<TvEpisode>>()
 
-    suspend fun episodes(showId: Int): List<TvEpisode> =
-        service.episodes(showId).map {
+    private fun <K, V> cachePut(cache: LinkedHashMap<K, V>, key: K, value: V, max: Int) {
+        synchronized(cache) {
+            while (cache.size >= max) cache.remove(cache.keys.first())
+            cache[key] = value
+        }
+    }
+
+    fun cachedSearch(query: String): List<TvShow>? = synchronized(searchCache) {
+        searchCache[query.trim().lowercase()]
+    }
+
+    suspend fun search(query: String): List<TvShow> = withContext(Dispatchers.IO) {
+        val key = query.trim().lowercase()
+        synchronized(searchCache) { searchCache[key] }?.let { return@withContext it }
+        val result = service.search(query).map { it.show }.filter { it.id != 0 }
+        cachePut(searchCache, key, result, 40)
+        result
+    }
+
+    fun cachedEpisodes(showId: Int): List<TvEpisode>? = synchronized(episodeCache) {
+        episodeCache[showId]
+    }
+
+    suspend fun episodes(showId: Int): List<TvEpisode> = withContext(Dispatchers.IO) {
+        synchronized(episodeCache) { episodeCache[showId] }?.let { return@withContext it }
+        val result = service.episodes(showId).map {
             TvEpisode(
                 id = it.id,
                 name = it.name ?: "Episode ${it.number ?: 0}",
@@ -54,5 +81,8 @@ object TvmazeApi {
                 airdate = it.airdate ?: "",
                 imageUrl = it.image?.medium ?: ""
             )
-        }
+        }.sortedWith(compareBy({ it.season }, { it.number }))
+        cachePut(episodeCache, showId, result, 24)
+        result
+    }
 }

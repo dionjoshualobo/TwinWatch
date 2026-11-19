@@ -1,7 +1,7 @@
 package com.dionlobo.watchtogether
 
-import android.content.Intent
-import androidx.compose.foundation.Image
+import android.content.ClipData
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -10,41 +10,40 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Comment
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Comment
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -56,9 +55,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -77,208 +79,552 @@ fun GroupDetailScreen(vm: MainViewModel, group: Group, go: (Screen) -> Unit) {
     val shows by remember(group.id) { vm.repo.showsFlow(group.id) }.collectAsState(emptyList())
     val notes by remember(group.id, uid) { vm.repo.notesFlow(group.id, uid) }.collectAsState(emptyList())
     val events by remember(group.id) { vm.repo.eventsFlow(group.id) }.collectAsState(emptyList())
+    val memberIds = members.map { it.uid }
+    val watchedByMember by remember(group.id, memberIds) {
+        vm.repo.memberWatchedFlow(group.id, memberIds)
+    }.collectAsState(emptyMap())
     var tab by remember { mutableStateOf(0) }
-    var invite by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
     val context = LocalContext.current
+    val clipboard = LocalClipboard.current
+    val scope = rememberCoroutineScope()
+    val accents = listOf(Brand.Blue, Brand.Mint, Brand.Coral, Brand.Amber)
+
+    fun copy(text: String, label: String) {
+        scope.launch { clipboard.setClipEntry(ClipEntry(ClipData.newPlainText(label, text))) }
+        Toast.makeText(context, label, Toast.LENGTH_SHORT).show()
+    }
 
     Scaffold(
+        containerColor = Brand.Paper,
         topBar = {
             TopAppBar(
-                title = { Text(group.name) },
+                title = { Text(group.name.uppercase(), style = MaterialTheme.typography.labelLarge, color = Brand.Ink) },
                 actions = {
-                    IconButton(onClick = { invite = true }) {
-                        Icon(Icons.Default.Share, contentDescription = "Invite")
+                    PunchButton(
+                        text = group.inviteCode,
+                        onClick = { copy(group.inviteCode, "Code copied") },
+                        modifier = Modifier.width(132.dp).height(48.dp),
+                        color = Brand.Amber,
+                        contentColor = Brand.OnAccent,
+                        leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null, tint = Brand.OnAccent) }
+                    )
+                    if (group.createdBy == uid) {
+                        PunchIconButton(onClick = { confirmDelete = true }, color = Brand.Coral, contentColor = Brand.OnAccent) {
+                            Icon(Icons.Default.Delete, contentDescription = "Delete circle", tint = Brand.OnAccent)
+                        }
                     }
-                }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Brand.Paper)
             )
-        },
-        floatingActionButton = {
-            if (tab == 0) {
-                FloatingActionButton(onClick = { go(Screen.AddShow(group)) }) {
-                    Icon(Icons.Default.Add, contentDescription = "Add show")
-                }
-            }
         }
     ) { padding ->
-        Column(modifier = Modifier.padding(padding).fillMaxSize().background(Brand.Ink)) {
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(Modifier.weight(1f)) {
-                    members.take(4).forEachIndexed { index, member ->
-                        val colors = listOf(Brand.Amber, Brand.Mint, Brand.Coral, Brand.Paper)
-                        Avatar(member.name.take(1).uppercase(), colors[index % colors.size])
-                    }
+        DecorBackground {
+            Column(modifier = Modifier.padding(padding).fillMaxSize()) {
+                Column(Modifier.padding(horizontal = 20.dp)) {
+                    PunchTabs(listOf("Shows", "Activity", "Notes", "Members"), tab) { tab = it }
                 }
-                Text(
-                    "CODE ${group.inviteCode}",
-                    color = Brand.Amber,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(Brand.InkSoft)
-                        .border(1.dp, Brand.Amber.copy(alpha = 0.5f), RoundedCornerShape(999.dp))
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
-                )
-            }
-            TabRow(selectedTabIndex = tab, containerColor = Brand.InkSoft, contentColor = Brand.Paper) {
-                Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Shows") })
-                Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Activity") })
-                Tab(selected = tab == 2, onClick = { tab = 2 }, text = { Text("Notes") })
-            }
-            when (tab) {
-                0 -> LazyColumn(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp)
-                ) {
-                    if (shows.isEmpty()) {
-                        item { Text("No shows yet. Add one with the + button.") }
-                    }
-                    items(shows) { show ->
-                        Card(
-                            modifier = Modifier.fillMaxWidth().clickable {
-                                go(Screen.ShowDetail(group, show))
-                            }
-                        ) {
-                            Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                if (show.imageUrl.isNotBlank()) {
-                                    AsyncImage(
-                                        model = show.imageUrl,
-                                        contentDescription = null,
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier.size(width = 48.dp, height = 68.dp)
-                                    )
-                                } else {
-                                    Image(
-                                        painter = painterResource(R.drawable.ic_launcher_foreground),
-                                        contentDescription = null,
-                                        modifier = Modifier.size(48.dp)
-                                    )
+                Spacer(Modifier.height(14.dp))
+                when (tab) {
+                    0 -> LazyColumn(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp)
+                    ) {
+                        if (shows.isEmpty()) {
+                            item {
+                                SoftCard(modifier = Modifier.fillMaxWidth()) {
+                                    Column(Modifier.padding(20.dp)) {
+                                        StatusPill("NO SHOWS", Brand.Amber)
+                                        Spacer(Modifier.height(12.dp))
+                                        Text("The shelf is empty.", style = MaterialTheme.typography.headlineMedium, color = Brand.Ink)
+                                        Spacer(Modifier.height(4.dp))
+                                        Text("Add a show to start tracking episodes.", color = Brand.Muted)
+                                    }
                                 }
-                                Spacer(Modifier.width(12.dp))
-                                Column {
-                                    Text(show.name, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
-                                    addedByText(show, members)
+                            }
+                        }
+                        itemsIndexed(shows) { index, show ->
+                            AnimatedEnter(index * 50) {
+                                PunchCard(
+                                    onClick = { go(Screen.ShowDetail(group, show)) },
+                                    accent = accents[index % accents.size]
+                                ) {
+                                    Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        ShowThumb(show.imageUrl, Brand.Blue)
+                                        Spacer(Modifier.width(14.dp))
+                                        Column(Modifier.weight(1f)) {
+                                            Text(show.name, style = MaterialTheme.typography.titleLarge, color = Brand.Ink)
+                                            Spacer(Modifier.height(5.dp))
+                                            addedByText(show, members)
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
-                }
-                1 -> LazyColumn(
-                    modifier = Modifier.weight(1f),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp)
-                ) {
-                    if (events.isEmpty()) item { Text("No activity yet. Mark an episode to get things moving.") }
-                    itemsIndexed(events) { index, event ->
-                        Row(Modifier.padding(vertical = 6.dp)) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    1 -> LazyColumn(
+                        modifier = Modifier.weight(1f),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp)
+                    ) {
+                        if (events.isEmpty()) {
+                            item { Text("No activity yet. Mark an episode to get things moving.", color = Brand.Muted) }
+                        }
+                        itemsIndexed(events) { index, event ->
+                            Row(
+                                Modifier.fillMaxWidth().height(IntrinsicSize.Min).padding(vertical = 8.dp),
+                                verticalAlignment = Alignment.Top
+                            ) {
                                 Box(
-                                    Modifier.size(10.dp).clip(CircleShape).background(
-                                        if (index == 0) Brand.Amber else Brand.Mint.copy(alpha = 0.6f)
+                                    Modifier.width(14.dp).fillMaxHeight(),
+                                    contentAlignment = Alignment.TopCenter
+                                ) {
+                                    if (index < events.size - 1) {
+                                        Box(Modifier.width(2.dp).fillMaxHeight().background(Brand.Border))
+                                    }
+                                    Box(
+                                        Modifier.size(12.dp).clip(CircleShape)
+                                            .background(if (index == 0) Brand.Blue else Brand.Mint)
+                                            .border(2.dp, Brand.Stroke, CircleShape)
                                     )
-                                )
-                                if (index < events.size - 1) {
-                                    Spacer(Modifier.height(6.dp).width(2.dp).background(Brand.InkSoft))
                                 }
-                            }
-                            Spacer(Modifier.width(14.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    event.body.ifBlank { event.authorName },
-                                    fontSize = 14.sp,
-                                    color = Brand.Paper
-                                )
-                                Spacer(Modifier.height(2.dp))
-                                Text(
-                                    "${event.authorName} · ${timeText(event.createdAt)}",
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                                Spacer(Modifier.width(10.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(event.body.ifBlank { event.authorName }, color = Brand.Ink, fontSize = 15.sp)
+                                    Spacer(Modifier.height(2.dp))
+                                    Text(
+                                        "${event.authorName} · ${timeText(event.createdAt)}",
+                                        fontSize = 11.sp,
+                                        color = Brand.Muted
+                                    )
+                                }
                             }
                         }
                     }
-                }
-                2 -> LazyColumn(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp)
-                ) {
-                     if (notes.isEmpty()) item { Text("No notes yet. Add them from a show or episode.") }
-                     itemsIndexed(notes) { index, note ->
-                         AnimatedEnter(index * 60) {
-                             Card(
-                                 Modifier.fillMaxWidth().border(
-                                     2.dp,
-                                     if (note.isPublic) Brand.Mint.copy(alpha = 0.7f) else Brand.Coral.copy(alpha = 0.7f),
-                                     RoundedCornerShape(14.dp)
-                                 )
-                             ) {
-                                 Column(Modifier.padding(14.dp)) {
-                                     Text(
-                                         "${note.authorName} · ${noteScopeLabel(note)}",
-                                         fontSize = 12.sp,
-                                         fontWeight = FontWeight.Bold,
-                                         color = if (note.isPublic) Brand.Mint else Brand.Coral
-                                     )
-                                     Spacer(Modifier.height(6.dp))
-                                     Text(note.text, color = Brand.Paper)
-                                     Spacer(Modifier.height(6.dp))
-                                     Text(timeText(note.createdAt), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                     2 -> LazyColumn(
+                         modifier = Modifier.weight(1f),
+                         verticalArrangement = Arrangement.spacedBy(10.dp),
+                         contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp)
+                     ) {
+                         if (notes.isEmpty()) {
+                             item { Text("No notes yet. Add them from a show or episode.", color = Brand.Muted) }
+                         }
+                         itemsIndexed(notes) { index, note ->
+                             AnimatedEnter(index * 50) {
+                                 PunchCard(
+                                     onClick = {
+                                         shows.firstOrNull { it.id == note.showId }?.let { go(Screen.ShowDetail(group, it)) }
+                                     },
+                                     accent = if (note.isPublic) Brand.Mint else Brand.Coral
+                                 ) {
+                                     Column(Modifier.padding(16.dp)) {
+                                         Text(note.text, style = MaterialTheme.typography.bodyLarge, color = Brand.Ink)
+                                         Spacer(Modifier.height(12.dp))
+                                         Row(verticalAlignment = Alignment.CenterVertically) {
+                                             Avatar(
+                                                 note.authorName.take(1).uppercase(),
+                                                 accents[index % accents.size],
+                                                 size = 30.dp
+                                             )
+                                             Spacer(Modifier.width(10.dp))
+                                             Column(Modifier.weight(1f)) {
+                                                 Text(
+                                                     if (note.uid == uid) "${note.authorName} (you)" else note.authorName,
+                                                     fontSize = 12.sp,
+                                                     fontWeight = FontWeight.Bold,
+                                                     color = Brand.Ink
+                                                 )
+                                                 Text(
+                                                     "${noteContext(note, shows)} · ${timeText(note.createdAt)}",
+                                                     fontSize = 11.sp,
+                                                     color = Brand.Muted
+                                                 )
+                                             }
+                                         }
+                                     }
+                                 }
+                             }
+                         }
+                     }
+                     3 -> LazyColumn(
+                         modifier = Modifier.weight(1f),
+                         verticalArrangement = Arrangement.spacedBy(10.dp),
+                         contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp)
+                     ) {
+                         itemsIndexed(members) { index, member ->
+                             val memberWatched = watchedByMember[member.uid].orEmpty()
+                             val showCount = memberWatched.map { it.showId }.distinct().size
+                             AnimatedEnter(index * 50) {
+                                 PunchCard(
+                                     onClick = { go(Screen.MemberDetail(group, member)) },
+                                     accent = accents[index % accents.size]
+                                 ) {
+                                     Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                                         Avatar(member.name.take(1).uppercase(), accents[index % accents.size])
+                                         Spacer(Modifier.width(12.dp))
+                                         Column(Modifier.weight(1f)) {
+                                             Text(
+                                                 if (member.uid == uid) "${member.name} (you)" else member.name,
+                                                 style = MaterialTheme.typography.titleMedium,
+                                                 color = Brand.Ink
+                                             )
+                                             Spacer(Modifier.height(4.dp))
+                                             Text(
+                                                 "${memberWatched.size} ${if (memberWatched.size == 1) "episode" else "episodes"} · $showCount ${if (showCount == 1) "show" else "shows"}",
+                                                 fontSize = 12.sp,
+                                                 color = Brand.Muted
+                                             )
+                                             Spacer(Modifier.height(2.dp))
+                                             Text("Tap for progress and notes", fontSize = 11.sp, color = Brand.Blue)
+                                         }
+                                         StatusPill("${memberWatched.size}", accents[index % accents.size])
+                                     }
                                  }
                              }
                          }
                      }
                 }
+                if (tab == 0) {
+                    Column(Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
+                        PunchButton(
+                            text = "Add a show",
+                            onClick = { go(Screen.AddShow(group)) },
+                            modifier = Modifier.fillMaxWidth(),
+                            color = Brand.Blue,
+                            leadingIcon = { Icon(Icons.Default.Add, contentDescription = null, tint = Brand.OnPrimary) }
+                        )
+                    }
+                }
             }
         }
     }
 
-    if (invite) {
+    if (confirmDelete) {
         AlertDialog(
-            onDismissRequest = { invite = false },
-            title = { Text("Invite people") },
+            onDismissRequest = { confirmDelete = false },
+            containerColor = Brand.Surface,
+            shape = RoundedCornerShape(26.dp),
+            title = { Text("Delete circle?", color = Brand.Ink, fontWeight = FontWeight.Bold) },
             text = {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        group.inviteCode,
-                        style = MaterialTheme.typography.displayLarge,
-                        color = Brand.Amber,
-                        letterSpacing = 8.sp
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Text("Share this code, or send the link below.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
+                Text(
+                    "This permanently removes \"${group.name}\" and all of its shows, notes, and progress for everyone.",
+                    color = Brand.Muted
+                )
             },
             confirmButton = {
-                TextButton(onClick = {
-                    val share = Intent(Intent.ACTION_SEND).apply {
-                        type = "text/plain"
-                        putExtra(
-                            Intent.EXTRA_TEXT,
-                            "Join my Watch Together group (${group.name}) with code ${group.inviteCode}\nwatchtogether://join/${group.inviteCode}"
-                        )
+                PunchButton(
+                    text = "Delete",
+                    modifier = Modifier.width(120.dp),
+                    color = Brand.Coral,
+                    contentColor = Brand.OnAccent,
+                    onClick = {
+                        confirmDelete = false
+                        vm.launchApp {
+                            runCatching { vm.repo.deleteGroup(group.id) }
+                                .onSuccess { go(Screen.Groups) }
+                                .onFailure { if (!it.isCancellation()) vm.message = "Could not delete circle: ${it.localizedMessage}" }
+                        }
                     }
-                    context.startActivity(Intent.createChooser(share, "Share invite"))
-                }) { Text("Share") }
+                )
             },
-            dismissButton = { TextButton(onClick = { invite = false }) { Text("Close") } }
+            dismissButton = {
+                PunchButton(
+                    text = "Cancel",
+                    modifier = Modifier.width(120.dp),
+                    color = Brand.InkSoft,
+                    contentColor = Brand.Ink,
+                    borderColor = Brand.Border,
+                    onClick = { confirmDelete = false }
+                )
+            }
         )
     }
 }
 
 @Composable
+private fun GroupProgressList(
+    members: List<Member>,
+    watched: Map<String, List<WatchedEpisode>>,
+    showId: String,
+    total: Int,
+    currentUid: String,
+    onMember: (Member) -> Unit
+) {
+    val accents = listOf(Brand.Blue, Brand.Mint, Brand.Coral, Brand.Amber)
+    val rows = members
+        .map { member -> member to watched[member.uid].orEmpty().count { it.showId == showId } }
+        .sortedWith(compareByDescending<Pair<Member, Int>> { it.second }.thenBy { it.first.name })
+
+    SoftCard(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.fillMaxWidth().padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                StatusPill("PROGRESS", Brand.Blue)
+                Spacer(Modifier.weight(1f))
+                Text("$total EPISODES", fontSize = 10.sp, fontWeight = FontWeight.Black, color = Brand.Muted)
+            }
+            Spacer(Modifier.height(14.dp))
+            if (rows.isEmpty()) {
+                Text("No one here yet.", color = Brand.Muted)
+            }
+            rows.forEachIndexed { index, row ->
+                val member = row.first
+                val count = row.second
+                val fraction = if (total == 0) 0f else count.toFloat() / total
+                Box(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable { onMember(member) }
+                        .padding(vertical = 6.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "${index + 1}",
+                            modifier = Modifier.width(18.dp),
+                            color = Brand.Muted,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                        Avatar(member.name.take(1).uppercase(), accents[index % accents.size], size = 30.dp)
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    if (member.uid == currentUid) "${member.name} (you)" else member.name,
+                                    modifier = Modifier.weight(1f),
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                    color = Brand.Ink,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(Modifier.weight(1f))
+                                Text("$count/$total", color = Brand.Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Spacer(Modifier.height(5.dp))
+                            Box(
+                                Modifier.fillMaxWidth().height(9.dp).clip(RoundedCornerShape(6.dp)).background(Brand.PaperDim)
+                            ) {
+                                Box(
+                                    Modifier.fillMaxWidth(fraction).fillMaxHeight().clip(RoundedCornerShape(6.dp))
+                                        .background(Brush.horizontalGradient(listOf(accents[index % accents.size], Brand.Mint)))
+                                )
+                            }
+                        }
+                    }
+                }
+                if (index < rows.lastIndex) Spacer(Modifier.height(10.dp))
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun GroupProgressScreen(vm: MainViewModel, group: Group, show: ShowEntry, go: (Screen) -> Unit) {
+    val uid = vm.uid!!
+    val members by remember(group.id) { vm.repo.membersFlow(group.id) }.collectAsState(emptyList())
+    val memberIds = members.map { it.uid }
+    val memberWatched by remember(group.id, memberIds) {
+        vm.repo.memberWatchedFlow(group.id, memberIds)
+    }.collectAsState(emptyMap())
+    val counts = members.map { memberWatched[it.uid].orEmpty().count { episode -> episode.showId == show.id } }
+    val total = TvmazeApi.cachedEpisodes(show.id.toInt())?.size
+        ?: memberWatched.values.flatten().filter { it.showId == show.id }.distinctBy { "${it.season}-${it.number}" }.size
+    val average = if (counts.isEmpty() || total == 0) 0f else counts.average().toFloat() / total
+
+    Scaffold(
+        containerColor = Brand.Paper,
+        topBar = {
+            TopAppBar(
+                title = { Text("PROGRESS", style = MaterialTheme.typography.labelLarge, color = Brand.Ink) },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Brand.Paper)
+            )
+        }
+    ) { padding ->
+        DecorBackground {
+            LazyColumn(
+                modifier = Modifier.padding(padding).fillMaxSize(),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                item {
+                    SoftCard(modifier = Modifier.fillMaxWidth()) {
+                        Row(Modifier.fillMaxWidth().padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+                            ShowThumb(show.imageUrl, Brand.Blue)
+                            Spacer(Modifier.width(16.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(show.name.uppercase(), style = MaterialTheme.typography.headlineMedium, color = Brand.Ink)
+                                Spacer(Modifier.height(6.dp))
+                                Text("${members.size} ${if (members.size == 1) "MEMBER" else "MEMBERS"} · ${(average * 100).toInt()}% AVERAGE", color = Brand.Muted)
+                            }
+                        }
+                    }
+                }
+                item {
+                    GroupProgressList(
+                        members = members,
+                        watched = memberWatched,
+                        showId = show.id,
+                        total = total,
+                        currentUid = uid,
+                        onMember = { go(Screen.MemberDetail(group, it)) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MemberDetailScreen(vm: MainViewModel, group: Group, member: Member, go: (Screen) -> Unit) {
+    val uid = vm.uid!!
+    val watched by remember(group.id, member.uid) { vm.repo.watchedFlow(group.id, member.uid) }.collectAsState(emptyList())
+    val shows by remember(group.id) { vm.repo.showsFlow(group.id) }.collectAsState(emptyList())
+    val notes by remember(group.id, member.uid) { vm.repo.memberPublicNotesFlow(group.id, member.uid) }.collectAsState(emptyList())
+    val accents = listOf(Brand.Blue, Brand.Mint, Brand.Coral, Brand.Amber)
+    val watchedShows = watched.groupBy { it.showId }.toSortedMap(
+        compareBy { showId -> shows.firstOrNull { it.id == showId }?.name ?: showId }
+    )
+
+    Scaffold(
+        containerColor = Brand.Paper,
+        topBar = {
+            TopAppBar(
+                title = { Text(member.name.uppercase(), style = MaterialTheme.typography.labelLarge, color = Brand.Ink) },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Brand.Paper)
+            )
+        }
+    ) { padding ->
+        DecorBackground {
+            LazyColumn(
+                modifier = Modifier.padding(padding).fillMaxSize(),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                item {
+                    SoftCard(modifier = Modifier.fillMaxWidth()) {
+                        Row(Modifier.fillMaxWidth().padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Avatar(member.name.take(1).uppercase(), accents[0], size = 46.dp)
+                            Spacer(Modifier.width(16.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    if (member.uid == uid) "${member.name} (you)" else member.name,
+                                    style = MaterialTheme.typography.headlineMedium,
+                                    color = Brand.Ink
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    "${watched.size} ${if (watched.size == 1) "episode" else "episodes"} across ${watchedShows.size} ${if (watchedShows.size == 1) "show" else "shows"}",
+                                    color = Brand.Muted
+                                )
+                            }
+                        }
+                    }
+                }
+                item { Eyebrow("PROGRESS", Brand.Blue) }
+                if (watchedShows.isEmpty()) {
+                    item { Text("Nothing watched yet.", color = Brand.Muted) }
+                }
+                watchedShows.forEach { (showId, episodesWatched) ->
+                    item {
+                        val show = shows.firstOrNull { it.id == showId }
+                        val total = show?.let { TvmazeApi.cachedEpisodes(it.id.toInt())?.size } ?: episodesWatched.size
+                        PunchCard(
+                            onClick = { show?.let { go(Screen.ShowDetail(group, it)) } },
+                            accent = accents[shows.indexOfFirst { it.id == showId }.coerceAtLeast(0) % accents.size]
+                        ) {
+                            Column(Modifier.padding(16.dp)) {
+                                Text(showName(shows, showId), color = Brand.Ink, fontWeight = FontWeight.Bold)
+                                Spacer(Modifier.height(4.dp))
+                                Text("${episodesWatched.size} of $total watched", color = Brand.Muted, fontSize = 12.sp)
+                                Spacer(Modifier.height(10.dp))
+                                episodesWatched.groupBy { it.season }.toSortedMap().forEach { (season, seasonEpisodes) ->
+                                    Spacer(Modifier.height(6.dp))
+                                    Text("SEASON $season", color = Brand.Blue, fontSize = 10.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                                    Spacer(Modifier.height(3.dp))
+                                    Text(
+                                        seasonEpisodes.joinToString("  ·  ") { epLabel(it.season, it.number) },
+                                        color = Brand.Ink,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                item { Eyebrow("PUBLIC NOTES", Brand.Amber) }
+                if (notes.isEmpty()) {
+                    item { Text("No public notes from ${member.name} yet.", color = Brand.Muted) }
+                }
+                itemsIndexed(notes) { index, note ->
+                    AnimatedEnter(index * 50) {
+                        PunchCard(
+                            onClick = {
+                                shows.firstOrNull { it.id == note.showId }?.let { go(Screen.ShowDetail(group, it)) }
+                            },
+                            accent = Brand.Mint
+                        ) {
+                            Column(Modifier.padding(16.dp)) {
+                                Text(note.text, style = MaterialTheme.typography.bodyLarge, color = Brand.Ink)
+                                Spacer(Modifier.height(10.dp))
+                                Text(
+                                    "${noteContext(note, shows)} · ${timeText(note.createdAt)}",
+                                    fontSize = 11.sp,
+                                    color = Brand.Muted
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ShowThumb(url: String, accent: Color) {
+    Box(
+        Modifier
+            .size(width = 52.dp, height = 72.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Brush.linearGradient(listOf(accent.copy(alpha = 0.25f), Brand.Amber.copy(alpha = 0.2f))))
+            .border(2.dp, Brand.Stroke, RoundedCornerShape(12.dp)),
+        contentAlignment = Alignment.Center
+    ) {
+        if (url.isNotBlank()) {
+            AsyncImage(
+                model = url,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+            Box(Modifier.fillMaxSize().background(Brand.ImageScrim))
+        } else {
+            Text("WT", color = Brand.Ink, fontWeight = FontWeight.Black, fontSize = 16.sp)
+        }
+    }
+}
+
+@Composable
 private fun addedByText(show: ShowEntry, members: List<Member>) {
-    Text("Added by ${members.firstOrNull { it.uid == show.addedBy }?.name ?: "someone"}", fontSize = 12.sp)
+    Text(
+        "Added by ${members.firstOrNull { it.uid == show.addedBy }?.name ?: "someone"}",
+        fontSize = 12.sp,
+        color = Brand.Muted
+    )
 }
 
 private fun noteScopeLabel(note: Note) = when (note.scope) {
     "season" -> "Season ${note.season}"
     "episode" -> epLabel(note.season, note.episode)
-    else -> "Show"
+    else -> "Show note"
 }
+
+private fun showName(shows: List<ShowEntry>, showId: String) =
+    shows.firstOrNull { it.id == showId }?.name ?: if (showId.isBlank()) "Circle note" else "Removed show"
+
+private fun noteContext(note: Note, shows: List<ShowEntry>) =
+    "${showName(shows, note.showId)} · ${noteScopeLabel(note)}"
 
 private fun timeText(ts: Long): String {
     if (ts <= 0L) return ""
@@ -293,20 +639,24 @@ private fun timeText(ts: Long): String {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ShowDetailScreen(vm: MainViewModel, group: Group, show: ShowEntry) {
+fun ShowDetailScreen(vm: MainViewModel, group: Group, show: ShowEntry, go: (Screen) -> Unit) {
     val uid = vm.uid!!
     val watched by remember(group.id, uid) { vm.repo.watchedFlow(group.id, uid) }.collectAsState(emptyList())
-    val scope = rememberCoroutineScope()
-    var episodes by remember { mutableStateOf<List<TvEpisode>>(emptyList()) }
-    var loading by remember { mutableStateOf(true) }
+    val cachedEpisodes = remember(show.id) { TvmazeApi.cachedEpisodes(show.id.toInt()) }
+    var episodes by remember(show.id) { mutableStateOf(cachedEpisodes ?: emptyList()) }
+    var loading by remember(show.id) { mutableStateOf(cachedEpisodes == null) }
     var rangeTarget by remember { mutableStateOf<TvEpisode?>(null) }
     var noteTarget by remember { mutableStateOf<Pair<String, Pair<Int, Int>>?>(null) }
+    var confirmRemove by remember { mutableStateOf(false) }
+    var confirmRewatch by remember { mutableStateOf(false) }
+    var selectedSeason by remember(show.id) { mutableStateOf<Int?>(null) }
+    var seasonMenuOpen by remember { mutableStateOf(false) }
 
     LaunchedEffect(show.id) {
         try {
             episodes = TvmazeApi.episodes(show.id.toInt()).sortedWith(compareBy({ it.season }, { it.number }))
         } catch (e: Exception) {
-            vm.message = "Could not load episodes: ${e.localizedMessage}"
+            if (!e.isCancellation()) vm.message = "Could not load episodes: ${e.localizedMessage}"
         } finally {
             loading = false
         }
@@ -314,120 +664,208 @@ fun ShowDetailScreen(vm: MainViewModel, group: Group, show: ShowEntry) {
 
     val watchedIds = watched.map { it.id }.toSet()
     val seasons = episodes.groupBy { it.season }.toSortedMap()
+    val seasonOptions = seasons.keys.toList()
+    val selectedEpisodes = selectedSeason?.let { seasons[it].orEmpty() }.orEmpty()
 
-    Scaffold(topBar = { TopAppBar(title = { Text(show.name) }) }) { padding ->
-        if (loading) {
-            Column(Modifier.padding(padding).fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                CircularProgressIndicator()
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier.padding(padding).fillMaxSize(),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp)
-            ) {
-                item {
-                    val done = episodes.count { watchedIds.contains(it.id.toString()) }
-                    val progress = if (episodes.isEmpty()) 0f else done.toFloat() / episodes.size
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (show.imageUrl.isNotBlank()) {
-                            AsyncImage(
-                                model = show.imageUrl,
-                                contentDescription = null,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .size(width = 76.dp, height = 108.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .border(1.dp, Brand.Amber.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
-                            )
+    LaunchedEffect(seasonOptions) {
+        if (seasonOptions.isNotEmpty() && selectedSeason !in seasonOptions) selectedSeason = seasonOptions.first()
+    }
+
+    Scaffold(
+        containerColor = Brand.Paper,
+        topBar = {
+            TopAppBar(
+                title = { Text(show.name.uppercase(), style = MaterialTheme.typography.labelLarge, color = Brand.Ink) },
+                actions = {
+                    if (show.addedBy == uid || group.createdBy == uid) {
+                        PunchIconButton(onClick = { confirmRemove = true }, color = Brand.Coral, contentColor = Brand.OnAccent) {
+                            Icon(Icons.Default.Delete, contentDescription = "Remove show", tint = Brand.OnAccent)
                         }
-                        Spacer(Modifier.width(16.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                show.name.uppercase(),
-                                style = MaterialTheme.typography.headlineMedium,
-                                color = Brand.Paper
-                            )
-                            AccentDivider()
-                            Spacer(Modifier.height(6.dp))
-                            Text(
-                                "$done of ${episodes.size} watched",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            TextButton(onClick = { noteTarget = "show" to (0 to 0) }) {
-                                Icon(Icons.Default.Comment, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("Add a note")
-                            }
-                        }
-                        ProgressRing(progress)
                     }
-                    Spacer(Modifier.height(18.dp))
-                }
-
-                seasons.forEach { (season, seasonEpisodes) ->
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Brand.Paper)
+            )
+        }
+    ) { padding ->
+        DecorBackground {
+            if (loading) {
+                LazyColumn(
+                    modifier = Modifier.padding(padding).fillMaxSize(),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp)
+                ) {
                     item {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("Season $season", fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.weight(1f))
-                            IconButton(onClick = { noteTarget = "season" to (season to 0) }) {
-                                Icon(Icons.Default.Comment, contentDescription = "Season note")
+                            ShimmerBar(76.dp, 108.dp)
+                            Spacer(Modifier.width(16.dp))
+                            Column(Modifier.weight(1f)) {
+                                ShimmerBar(180.dp, 22.dp)
+                                Spacer(Modifier.height(10.dp))
+                                ShimmerBar(120.dp, 12.dp)
                             }
                         }
-                        Spacer(Modifier.height(4.dp))
+                        Spacer(Modifier.height(24.dp))
                     }
-                    items(seasonEpisodes) { ep ->
-                        val isWatched = watchedIds.contains(ep.id.toString())
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(if (isWatched) Brand.InkSoft else androidx.compose.ui.graphics.Color.Transparent)
-                                .clickable {
-                                    if (isWatched) {
-                                        scope.launch { vm.repo.unmarkEpisode(group.id, uid, ep.id) }
-                                    } else {
-                                        val previous = watched
-                                            .filter { it.season < ep.season || (it.season == ep.season && it.number < ep.number) }
-                                            .maxByOrNull { it.season * 10000 + it.number }
-                                        if (previous != null) {
-                                            rangeTarget = ep
-                                        } else {
-                                            scope.launch {
-                                                vm.repo.markEpisodes(group.id, uid, vm.myName, show, listOf(ep), "marked ${epLabel(ep.season, ep.number)}")
-                                            }
+                    items(6) { ShowSkeletonRow() }
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.padding(padding).fillMaxSize(),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    item {
+                        val done = episodes.count { watchedIds.contains(it.id.toString()) }
+                        val progress = if (episodes.isEmpty()) 0f else done.toFloat() / episodes.size
+                        val complete = episodes.isNotEmpty() && done == episodes.size
+                        SoftCard(modifier = Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(18.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    ShowThumb(show.imageUrl, Brand.Blue)
+                                    Spacer(Modifier.width(16.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            show.name.uppercase(),
+                                            style = MaterialTheme.typography.headlineMedium,
+                                            color = Brand.Ink
+                                        )
+                                        Spacer(Modifier.height(6.dp))
+                                        Text("$done of ${episodes.size} watched", color = Brand.Muted)
+                                        if (complete) {
+                                            Spacer(Modifier.height(8.dp))
+                                            StatusPill("COMPLETE", Brand.Mint)
                                         }
                                     }
+                                    ProgressRing(progress)
                                 }
-                                .padding(horizontal = 8.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                Modifier
-                                    .size(28.dp)
-                                    .clip(CircleShape)
-                                    .background(if (isWatched) Brand.Mint else androidx.compose.ui.graphics.Color.Transparent)
-                                    .border(2.dp, if (isWatched) Brand.Mint else Brand.Muted, CircleShape),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                if (isWatched) {
-                                    Icon(
-                                        Icons.Default.Check,
-                                        contentDescription = "Watched",
-                                        tint = Brand.Ink,
-                                        modifier = Modifier.size(18.dp)
+                                Spacer(Modifier.height(14.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    PunchButton(
+                                        text = "Add a note",
+                                        onClick = { noteTarget = "show" to (0 to 0) },
+                                        modifier = Modifier.weight(1f).height(46.dp),
+                                        color = Brand.InkSoft,
+                                        contentColor = Brand.Ink,
+                                        borderColor = Brand.Border,
+                                        leadingIcon = { Icon(Icons.AutoMirrored.Filled.Comment, contentDescription = null, tint = Brand.Ink) }
+                                    )
+                                    PunchButton(
+                                        text = "Progress",
+                                        onClick = { go(Screen.GroupProgress(group, show)) },
+                                        modifier = Modifier.weight(1f).height(46.dp),
+                                        color = Brand.Blue,
+                                        contentColor = Brand.OnPrimary,
+                                        leadingIcon = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = Brand.OnPrimary) }
+                                    )
+                                }
+                                if (complete) {
+                                    Spacer(Modifier.height(10.dp))
+                                    PunchButton(
+                                        text = "Watch again",
+                                        onClick = { confirmRewatch = true },
+                                        modifier = Modifier.fillMaxWidth().height(46.dp),
+                                        color = Brand.Amber,
+                                        contentColor = Brand.OnAccent
                                     )
                                 }
                             }
-                            Spacer(Modifier.width(12.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    "${epLabel(ep.season, ep.number)}  ${ep.name}",
-                                    fontSize = 14.sp,
-                                    color = if (isWatched) Brand.Muted else Brand.Paper
-                                )
-                                if (isWatched) Text("Watched", fontSize = 11.sp, color = Brand.Mint)
+                        }
+                    }
+                    item {
+                        SoftCard(modifier = Modifier.fillMaxWidth()) {
+                            Row(
+                                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(Modifier.weight(1f)) {
+                                    PunchButton(
+                                        text = "Choose season",
+                                        onClick = { seasonMenuOpen = true },
+                                        modifier = Modifier.fillMaxWidth().height(44.dp),
+                                        color = Brand.InkSoft,
+                                        contentColor = Brand.Ink,
+                                        borderColor = Brand.Border,
+                                        leadingIcon = {
+                                            Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, tint = Brand.Ink)
+                                        }
+                                    )
+                                    DropdownMenu(
+                                        expanded = seasonMenuOpen,
+                                        onDismissRequest = { seasonMenuOpen = false },
+                                        modifier = Modifier.background(Brand.Surface)
+                                    ) {
+                                        seasonOptions.forEach { season ->
+                                            DropdownMenuItem(
+                                                text = { Text("Season $season", color = Brand.Ink) },
+                                                trailingIcon = {
+                                                    if (season == selectedSeason) Text("✓", color = Brand.Mint, fontWeight = FontWeight.Black)
+                                                },
+                                                onClick = {
+                                                    selectedSeason = season
+                                                    seasonMenuOpen = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                                selectedSeason?.let { season ->
+                                    Spacer(Modifier.width(10.dp))
+                                    PunchIconButton(
+                                        onClick = { noteTarget = "season" to (season to 0) },
+                                        color = Brand.Amber
+                                    ) {
+                                        Icon(Icons.AutoMirrored.Filled.Comment, contentDescription = "Season note", tint = Brand.OnAccent)
+                                    }
+                                }
                             }
-                            IconButton(onClick = { noteTarget = "episode" to (ep.season to ep.number) }) {
-                                Icon(Icons.Default.Comment, contentDescription = "Episode note", modifier = Modifier.size(18.dp))
+                        }
+                    }
+                    items(selectedEpisodes) { ep ->
+                        val isWatched = watchedIds.contains(ep.id.toString())
+                        PunchCard(
+                            onClick = {
+                                if (isWatched) {
+                                    vm.launchApp { vm.repo.unmarkEpisode(group.id, uid, ep.id) }
+                                } else {
+                                    val previous = watched
+                                        .filter { it.season < ep.season || (it.season == ep.season && it.number < ep.number) }
+                                        .maxByOrNull { it.season * 10000 + it.number }
+                                    if (previous != null) {
+                                        rangeTarget = ep
+                                    } else {
+                                        vm.launchApp {
+                                            vm.repo.markEpisodes(group.id, uid, vm.myName, show, listOf(ep), "marked ${epLabel(ep.season, ep.number)}")
+                                        }
+                                    }
+                                }
+                            },
+                            accent = if (isWatched) Brand.Mint else Brand.Border
+                        ) {
+                            Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    Modifier.size(30.dp).clip(CircleShape)
+                                        .background(if (isWatched) Brand.Mint else Brand.Surface)
+                                        .border(2.dp, if (isWatched) Brand.Stroke else Brand.Border, CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (isWatched) Icon(Icons.Default.Check, contentDescription = null, tint = Brand.OnAccent, modifier = Modifier.size(18.dp))
+                                }
+                                Spacer(Modifier.width(12.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        "${epLabel(ep.season, ep.number)}  ${ep.name}",
+                                        fontSize = 14.sp,
+                                        color = Brand.Ink,
+                                        fontWeight = if (isWatched) FontWeight.Normal else FontWeight.Bold
+                                    )
+                                    if (isWatched) Text("WATCHED", fontSize = 10.sp, fontWeight = FontWeight.Black, color = Brand.Mint)
+                                }
+                                PunchIconButton(
+                                    onClick = { noteTarget = "episode" to (ep.season to ep.number) },
+                                    color = Brand.Surface,
+                                    modifier = Modifier.size(42.dp)
+                                ) {
+                                    Icon(Icons.AutoMirrored.Filled.Comment, contentDescription = "Episode note", tint = Brand.Ink, modifier = Modifier.size(18.dp))
+                                }
                             }
                         }
                     }
@@ -449,15 +887,25 @@ fun ShowDetailScreen(vm: MainViewModel, group: Group, show: ShowEntry) {
 
         AlertDialog(
             onDismissRequest = { rangeTarget = null },
-            title = { Text("Mark episodes?") },
-            text = { Text("Mark $summary (${range.size} episode${if (range.size == 1) "" else "s"})? Everyone in the group will be notified.") },
+            containerColor = Brand.Surface,
+            shape = RoundedCornerShape(26.dp),
+            title = { Text("Mark episodes?", color = Brand.Ink, fontWeight = FontWeight.Bold) },
+            text = { Text("Add ${if (range.size == 1) labelEnd else "$labelStart–$labelEnd"} (${range.size} episode${if (range.size == 1) "" else "s"}) to your watched list? Everyone in the group will see it in Activity.", color = Brand.Muted) },
             confirmButton = {
-                TextButton(onClick = {
-                    scope.launch { vm.repo.markEpisodes(group.id, uid, vm.myName, show, range, summary) }
-                    rangeTarget = null
-                }) { Text("Mark all") }
+                PunchButton(
+                    text = "Mark all",
+                    modifier = Modifier.width(120.dp),
+                    color = Brand.Mint,
+                    contentColor = Brand.OnAccent,
+                    onClick = {
+                        vm.launchApp { vm.repo.markEpisodes(group.id, uid, vm.myName, show, range, summary) }
+                        rangeTarget = null
+                    }
+                )
             },
-            dismissButton = { TextButton(onClick = { rangeTarget = null }) { Text("Cancel") } }
+            dismissButton = {
+                PunchButton("Cancel", { rangeTarget = null }, Modifier.width(120.dp), color = Brand.InkSoft, contentColor = Brand.Ink, borderColor = Brand.Border)
+            }
         )
     }
 
@@ -472,7 +920,7 @@ fun ShowDetailScreen(vm: MainViewModel, group: Group, show: ShowEntry) {
             label = label,
             onDismiss = { noteTarget = null }
         ) { text, isPublic ->
-            scope.launch {
+            vm.launchApp {
                 vm.repo.addNote(
                     group.id, uid, vm.myName, show, scopeName,
                     numbers.first, numbers.second, text, isPublic
@@ -480,6 +928,78 @@ fun ShowDetailScreen(vm: MainViewModel, group: Group, show: ShowEntry) {
                 noteTarget = null
             }
         }
+    }
+
+    if (confirmRewatch) {
+        AlertDialog(
+            onDismissRequest = { confirmRewatch = false },
+            containerColor = Brand.Surface,
+            shape = RoundedCornerShape(26.dp),
+            title = { Text("Watch again?", color = Brand.Ink, fontWeight = FontWeight.Bold) },
+            text = { Text("This clears your watched markers for this show so you can track a rewatch. Group activity and notes stay.", color = Brand.Muted) },
+            confirmButton = {
+                PunchButton(
+                    text = "Reset",
+                    modifier = Modifier.width(120.dp),
+                    color = Brand.Amber,
+                    contentColor = Brand.OnAccent,
+                    onClick = {
+                        confirmRewatch = false
+                        vm.launchApp {
+                            runCatching {
+                                vm.repo.resetShowProgress(group.id, uid, episodes.map { it.id.toString() })
+                            }.onFailure { if (!it.isCancellation()) vm.message = "Could not reset progress: ${it.localizedMessage}" }
+                        }
+                    }
+                )
+            },
+            dismissButton = {
+                PunchButton(
+                    text = "Cancel",
+                    modifier = Modifier.width(120.dp),
+                    color = Brand.InkSoft,
+                    contentColor = Brand.Ink,
+                    borderColor = Brand.Border,
+                    onClick = { confirmRewatch = false }
+                )
+            }
+        )
+    }
+
+    if (confirmRemove) {
+        AlertDialog(
+            onDismissRequest = { confirmRemove = false },
+            containerColor = Brand.Surface,
+            shape = RoundedCornerShape(26.dp),
+            title = { Text("Remove show?", color = Brand.Ink, fontWeight = FontWeight.Bold) },
+            text = { Text("Remove \"${show.name}\" from this circle? Its notes and activity stay in the history.", color = Brand.Muted) },
+            confirmButton = {
+                PunchButton(
+                    text = "Remove",
+                    modifier = Modifier.width(120.dp),
+                    color = Brand.Coral,
+                    contentColor = Brand.OnAccent,
+                    onClick = {
+                        confirmRemove = false
+                        vm.launchApp {
+                            runCatching { vm.repo.removeShow(group.id, show.id) }
+                                .onSuccess { go(Screen.GroupDetail(group)) }
+                                .onFailure { if (!it.isCancellation()) vm.message = "Could not remove show: ${it.localizedMessage}" }
+                        }
+                    }
+                )
+            },
+            dismissButton = {
+                PunchButton(
+                    text = "Cancel",
+                    modifier = Modifier.width(120.dp),
+                    color = Brand.InkSoft,
+                    contentColor = Brand.Ink,
+                    borderColor = Brand.Border,
+                    onClick = { confirmRemove = false }
+                )
+            }
+        )
     }
 }
 
@@ -489,7 +1009,9 @@ fun NoteDialog(label: String, onDismiss: () -> Unit, onSave: (String, Boolean) -
     var isPublic by remember { mutableStateOf(true) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Note about $label") },
+        containerColor = Brand.Surface,
+        shape = RoundedCornerShape(26.dp),
+        title = { Text("Note about $label", color = Brand.Ink, fontWeight = FontWeight.Bold) },
         text = {
             Column {
                 OutlinedTextField(
@@ -497,20 +1019,29 @@ fun NoteDialog(label: String, onDismiss: () -> Unit, onSave: (String, Boolean) -
                     onValueChange = { text = it },
                     label = { Text("Your note") },
                     minLines = 3,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = wtFieldColors()
                 )
                 Spacer(Modifier.height(12.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Switch(checked = isPublic, onCheckedChange = { isPublic = it })
                     Spacer(Modifier.width(8.dp))
-                    Text(if (isPublic) "Visible to the group" else "Only visible to me")
+                    Text(if (isPublic) "Visible to the group" else "Only visible to me", color = Brand.Ink)
                 }
             }
         },
         confirmButton = {
-            TextButton(onClick = { if (text.isNotBlank()) onSave(text.trim(), isPublic) }) { Text("Save") }
+            PunchButton(
+                text = "Save",
+                enabled = text.isNotBlank(),
+                modifier = Modifier.width(110.dp),
+                color = Brand.Blue,
+                onClick = { if (text.isNotBlank()) onSave(text.trim(), isPublic) }
+            )
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+        dismissButton = {
+            PunchButton("Cancel", onDismiss, Modifier.width(110.dp), color = Brand.InkSoft, contentColor = Brand.Ink, borderColor = Brand.Border)
+        }
     )
 }
 
@@ -518,71 +1049,127 @@ fun NoteDialog(label: String, onDismiss: () -> Unit, onSave: (String, Boolean) -
 @Composable
 fun AddShowScreen(vm: MainViewModel, group: Group, onBack: () -> Unit) {
     var query by remember { mutableStateOf("") }
-    var results by remember { mutableStateOf<List<TvShow>>(emptyList()) }
+    var results by remember { mutableStateOf<List<TvShow>>(TvmazeApi.cachedSearch("") ?: emptyList()) }
     var searching by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
+    var hasSearched by remember { mutableStateOf(false) }
 
     LaunchedEffect(query) {
-        if (query.trim().length < 2) {
+        val q = query.trim()
+        if (q.length < 2) {
             results = emptyList()
             searching = false
+            hasSearched = false
             return@LaunchedEffect
         }
-        delay(350)
+        TvmazeApi.cachedSearch(q)?.let {
+            results = it
+            searching = false
+            hasSearched = true
+            return@LaunchedEffect
+        }
+        results = emptyList()
         searching = true
+        delay(220)
         try {
-            results = TvmazeApi.search(query.trim())
+            results = TvmazeApi.search(q)
+            hasSearched = true
         } catch (e: Exception) {
-            vm.message = "Search failed: ${e.localizedMessage}"
+            if (!e.isCancellation()) vm.message = "Search failed: ${e.localizedMessage}"
         } finally {
             searching = false
         }
     }
 
-    Scaffold(topBar = { TopAppBar(title = { Text("Add a show") }) }) { padding ->
+    Scaffold(
+        containerColor = Brand.Paper,
+        topBar = {
+            TopAppBar(
+                title = { Text("ADD A SHOW", style = MaterialTheme.typography.labelLarge, color = Brand.Ink) },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Brand.Paper)
+            )
+        }
+    ) { padding ->
         DecorBackground {
             Column(modifier = Modifier.padding(padding).padding(20.dp).fillMaxSize()) {
-                Text("FIND A SHOW", style = MaterialTheme.typography.headlineLarge, color = Brand.Amber)
-                AccentDivider()
+                ScreenHeader(
+                    step = "03 / ADD TO CIRCLE",
+                    title = "Find a show.",
+                    subtitle = "Search once, add it, and the whole group sees it.",
+                    accent = Brand.Mint
+                )
                 Spacer(Modifier.height(16.dp))
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it },
                     label = { Text("Search TVMaze") },
+                    placeholder = { Text("Try a show title") },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Brand.Blue) },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = wtFieldColors()
                 )
                 Spacer(Modifier.height(14.dp))
-                if (searching) CircularProgressIndicator(color = Brand.Mint)
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    itemsIndexed(results) { index, show ->
-                        AnimatedEnter(index * 50) {
-                            Card(
-                                modifier = Modifier.fillMaxWidth().clickable {
-                                    scope.launch {
-                                        vm.repo.addShow(group.id, show, vm.uid!!)
-                                        onBack()
+                when {
+                    searching -> LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        items(5) { ShowSkeletonRow() }
+                    }
+                    results.isEmpty() -> {
+                        SoftCard(modifier = Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(20.dp)) {
+                                StatusPill(if (!hasSearched) "READY WHEN YOU ARE" else "NO MATCHES", Brand.Amber)
+                                Spacer(Modifier.height(12.dp))
+                                Text(
+                                    if (!hasSearched) "Type at least two letters." else "Try a shorter or more exact title.",
+                                    color = Brand.Ink
+                                )
+                            }
+                        }
+                    }
+                    else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        itemsIndexed(results) { index, show ->
+                            AnimatedEnter(index * 40) {
+                                PunchCard(
+                                    onClick = {
+                                        vm.launchApp {
+                                            vm.repo.addShow(group.id, show, vm.uid!!)
+                                            onBack()
+                                        }
+                                    },
+                                    accent = listOf(Brand.Blue, Brand.Mint, Brand.Coral, Brand.Amber)[index % 4]
+                                ) {
+                                    Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        ShowThumb(show.image?.medium.orEmpty(), Brand.Mint)
+                                        Spacer(Modifier.width(14.dp))
+                                        Column(Modifier.weight(1f)) {
+                                            Text(show.name, fontWeight = FontWeight.Bold, color = Brand.Ink)
+                                            Spacer(Modifier.height(3.dp))
+                                            Text("Tap to add to ${group.name}", fontSize = 11.sp, color = Brand.Muted)
+                                        }
+                                        PunchIconButton(
+                                            onClick = {
+                                                vm.launchApp {
+                                                    vm.repo.addShow(group.id, show, vm.uid!!)
+                                                    onBack()
+                                                }
+                                            },
+                                            color = Brand.Mint
+                                        ) {
+                                            Icon(Icons.Default.Add, contentDescription = "Add", tint = Brand.OnAccent)
+                                        }
                                     }
-                                }
-                            ) {
-                                Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    if (!show.image?.medium.isNullOrBlank()) {
-                                        AsyncImage(
-                                            model = show.image!!.medium,
-                                            contentDescription = null,
-                                            contentScale = ContentScale.Crop,
-                                            modifier = Modifier
-                                                .size(width = 52.dp, height = 74.dp)
-                                                .clip(RoundedCornerShape(8.dp))
-                                        )
-                                    }
-                                    Spacer(Modifier.width(14.dp))
-                                    Text(show.name, fontWeight = FontWeight.SemiBold, color = Brand.Paper)
                                 }
                             }
                         }
                     }
                 }
+                Spacer(Modifier.height(16.dp))
+                PunchButton(
+                    text = "Back to circle",
+                    onClick = onBack,
+                    modifier = Modifier.fillMaxWidth(),
+                    color = Brand.Surface,
+                    contentColor = Brand.Ink
+                )
             }
         }
     }

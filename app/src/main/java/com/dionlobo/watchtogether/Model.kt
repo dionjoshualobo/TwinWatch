@@ -44,6 +44,7 @@ data class WatchedEpisode(
     val season: Int = 0,
     val number: Int = 0,
     val name: String = "",
+    val showId: String = "",
     val markedAt: Long = 0L
 )
 
@@ -104,6 +105,7 @@ fun DocumentSnapshot.toWatchedEpisode(): WatchedEpisode = WatchedEpisode(
     season = int("season"),
     number = int("number"),
     name = str("name"),
+    showId = str("showId"),
     markedAt = long("markedAt")
 )
 

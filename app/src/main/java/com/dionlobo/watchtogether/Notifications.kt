@@ -48,7 +48,7 @@ fun showActivityNotification(context: Context, body: String, groupId: String) {
 
     val notification = NotificationCompat.Builder(context, CHANNEL_ID)
         .setSmallIcon(R.drawable.ic_launcher_foreground)
-        .setContentTitle("Watch Together")
+        .setContentTitle("TwinWatch")
         .setContentText(body)
         .setStyle(NotificationCompat.BigTextStyle().bigText(body))
         .setAutoCancel(true)
