@@ -278,35 +278,43 @@ class Repository {
         episodes: List<TvEpisode>,
         summary: String
     ) {
+        val uniqueEpisodes = episodes.distinctBy { it.id }
+        if (uniqueEpisodes.isEmpty()) return
         val watched = db.collection("groups").document(groupId)
             .collection("watched").document(uid).collection("episodes")
         val groupMemberUids = memberIds(groupId)
-        db.runBatch { batch ->
-            episodes.forEach { ep ->
-                batch.set(
-                    watched.document(ep.id.toString()),
-                    mapOf(
-                        "season" to ep.season,
-                        "number" to ep.number,
-                        "name" to ep.name,
-                        "showId" to show.id,
-                        "memberUids" to groupMemberUids,
-                        "markedAt" to System.currentTimeMillis()
+        val chunks = uniqueEpisodes.chunked(300)
+        val events = db.collection("groups").document(groupId).collection("events")
+        chunks.forEachIndexed { index, chunk ->
+            db.runBatch { batch ->
+                chunk.forEach { ep ->
+                    batch.set(
+                        watched.document(ep.id.toString()),
+                        mapOf(
+                            "season" to ep.season,
+                            "number" to ep.number,
+                            "name" to ep.name,
+                            "showId" to show.id,
+                            "memberUids" to groupMemberUids,
+                            "markedAt" to System.currentTimeMillis()
+                        )
                     )
-                )
-            }
-            batch.set(
-                db.collection("groups").document(groupId).collection("events").document(),
-                mapOf(
-                    "uid" to uid,
-                    "authorName" to authorName,
-                    "showId" to show.id,
-                    "memberUids" to groupMemberUids,
-                    "body" to "$authorName $summary of ${show.name}",
-                    "createdAt" to System.currentTimeMillis()
-                )
-            )
-        }.await()
+                }
+                if (index == chunks.lastIndex) {
+                    batch.set(
+                        events.document(),
+                        mapOf(
+                            "uid" to uid,
+                            "authorName" to authorName,
+                            "showId" to show.id,
+                            "memberUids" to groupMemberUids,
+                            "body" to "$authorName $summary of ${show.name}",
+                            "createdAt" to System.currentTimeMillis()
+                        )
+                    )
+                }
+            }.await()
+        }
     }
 
     suspend fun unmarkEpisode(groupId: String, uid: String, episodeId: Int) {

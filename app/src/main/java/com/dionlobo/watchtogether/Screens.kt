@@ -71,6 +71,8 @@ import kotlinx.coroutines.launch
 private fun epLabel(season: Int, number: Int) =
     "S${season.toString().padStart(2, '0')}E${number.toString().padStart(2, '0')}"
 
+private data class MarkTarget(val episode: TvEpisode, val earlierUnwatched: List<TvEpisode>)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GroupDetailScreen(vm: MainViewModel, group: Group, go: (Screen) -> Unit) {
@@ -645,7 +647,7 @@ fun ShowDetailScreen(vm: MainViewModel, group: Group, show: ShowEntry, go: (Scre
     val cachedEpisodes = remember(show.id) { TvmazeApi.cachedEpisodes(show.id.toInt()) }
     var episodes by remember(show.id) { mutableStateOf(cachedEpisodes ?: emptyList()) }
     var loading by remember(show.id) { mutableStateOf(cachedEpisodes == null) }
-    var rangeTarget by remember { mutableStateOf<TvEpisode?>(null) }
+    var rangeTarget by remember { mutableStateOf<MarkTarget?>(null) }
     var noteTarget by remember { mutableStateOf<Pair<String, Pair<Int, Int>>?>(null) }
     var confirmRemove by remember { mutableStateOf(false) }
     var confirmRewatch by remember { mutableStateOf(false) }
@@ -826,11 +828,14 @@ fun ShowDetailScreen(vm: MainViewModel, group: Group, show: ShowEntry, go: (Scre
                                 if (isWatched) {
                                     vm.launchApp { vm.repo.unmarkEpisode(group.id, uid, ep.id) }
                                 } else {
-                                    val previous = watched
-                                        .filter { it.season < ep.season || (it.season == ep.season && it.number < ep.number) }
-                                        .maxByOrNull { it.season * 10000 + it.number }
-                                    if (previous != null) {
-                                        rangeTarget = ep
+                                    val index = episodes.indexOfFirst { it.id == ep.id }
+                                    val earlierUnwatched = if (index > 0) {
+                                        episodes.take(index).filterNot { watchedIds.contains(it.id.toString()) }
+                                    } else {
+                                        emptyList()
+                                    }
+                                    if (earlierUnwatched.isNotEmpty()) {
+                                        rangeTarget = MarkTarget(ep, earlierUnwatched)
                                     } else {
                                         vm.launchApp {
                                             vm.repo.markEpisodes(group.id, uid, vm.myName, show, listOf(ep), "marked ${epLabel(ep.season, ep.number)}")
@@ -875,26 +880,27 @@ fun ShowDetailScreen(vm: MainViewModel, group: Group, show: ShowEntry, go: (Scre
     }
 
     rangeTarget?.let { target ->
-        val previous = watched
-            .filter { it.season < target.season || (it.season == target.season && it.number < target.number) }
-            .maxByOrNull { it.season * 10000 + it.number }
-        val fromIndex = previous?.let { p -> episodes.indexOfFirst { it.id.toString() == p.id } }
-        val toIndex = episodes.indexOfFirst { it.id == target.id }
-        val range = if (fromIndex != null && toIndex > fromIndex) episodes.subList(fromIndex + 1, toIndex + 1) else listOf(target)
-        val labelStart = range.firstOrNull()?.let { epLabel(it.season, it.number) } ?: ""
-        val labelEnd = range.lastOrNull()?.let { epLabel(it.season, it.number) } ?: ""
-        val summary = if (range.size == 1) "marked $labelEnd" else "marked $labelStart–$labelEnd"
+        val range = target.earlierUnwatched + target.episode
+        val labelStart = epLabel(target.earlierUnwatched.first().season, target.earlierUnwatched.first().number)
+        val labelEnd = epLabel(target.episode.season, target.episode.number)
+        val summary = "marked $labelStart–$labelEnd"
 
         AlertDialog(
             onDismissRequest = { rangeTarget = null },
             containerColor = Brand.Surface,
             shape = RoundedCornerShape(26.dp),
-            title = { Text("Mark episodes?", color = Brand.Ink, fontWeight = FontWeight.Bold) },
-            text = { Text("Add ${if (range.size == 1) labelEnd else "$labelStart–$labelEnd"} (${range.size} episode${if (range.size == 1) "" else "s"}) to your watched list? Everyone in the group will see it in Activity.", color = Brand.Muted) },
+            title = { Text("Mark earlier episodes?", color = Brand.Ink, fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "There ${if (target.earlierUnwatched.size == 1) "is 1 earlier episode" else "are ${target.earlierUnwatched.size} earlier episodes"} " +
+                        "not watched yet. Mark all ${range.size} up to $labelEnd, or only this one?",
+                    color = Brand.Muted
+                )
+            },
             confirmButton = {
                 PunchButton(
                     text = "Mark all",
-                    modifier = Modifier.width(120.dp),
+                    modifier = Modifier.width(104.dp),
                     color = Brand.Mint,
                     contentColor = Brand.OnAccent,
                     onClick = {
@@ -904,7 +910,26 @@ fun ShowDetailScreen(vm: MainViewModel, group: Group, show: ShowEntry, go: (Scre
                 )
             },
             dismissButton = {
-                PunchButton("Cancel", { rangeTarget = null }, Modifier.width(120.dp), color = Brand.InkSoft, contentColor = Brand.Ink, borderColor = Brand.Border)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    PunchButton(
+                        text = "Only this",
+                        modifier = Modifier.width(96.dp),
+                        color = Brand.Blue,
+                        contentColor = Brand.OnPrimary,
+                        onClick = {
+                            vm.launchApp { vm.repo.markEpisodes(group.id, uid, vm.myName, show, listOf(target.episode), "marked $labelEnd") }
+                            rangeTarget = null
+                        }
+                    )
+                    PunchButton(
+                        text = "Cancel",
+                        modifier = Modifier.width(96.dp),
+                        color = Brand.InkSoft,
+                        contentColor = Brand.Ink,
+                        borderColor = Brand.Border,
+                        onClick = { rangeTarget = null }
+                    )
+                }
             }
         )
     }
