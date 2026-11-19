@@ -4,7 +4,8 @@ import com.google.firebase.firestore.DocumentSnapshot
 
 data class UserProfile(
     val uid: String = "",
-    val name: String = ""
+    val name: String = "",
+    val circleGroups: Map<String, String> = emptyMap()
 )
 
 data class Group(
@@ -77,8 +78,14 @@ private fun DocumentSnapshot.str(key: String): String = (get(key) as? String) ?:
 private fun DocumentSnapshot.long(key: String): Long = (get(key) as? Number)?.toLong() ?: 0L
 private fun DocumentSnapshot.int(key: String): Int = (get(key) as? Number)?.toInt() ?: 0
 private fun DocumentSnapshot.bool(key: String): Boolean = (get(key) as? Boolean) ?: false
+private fun DocumentSnapshot.stringMap(key: String): Map<String, String> =
+    (get(key) as? Map<*, *>)?.mapNotNull { (entryKey, entryValue) ->
+        val key = entryKey as? String ?: return@mapNotNull null
+        val value = entryValue as? String ?: return@mapNotNull null
+        key to value
+    }?.toMap() ?: emptyMap()
 
-fun DocumentSnapshot.toUserProfile(): UserProfile = UserProfile(id, str("name"))
+fun DocumentSnapshot.toUserProfile(): UserProfile = UserProfile(id, str("name"), stringMap("circleGroups"))
 
 fun DocumentSnapshot.toGroup(): Group = Group(
     id = id,

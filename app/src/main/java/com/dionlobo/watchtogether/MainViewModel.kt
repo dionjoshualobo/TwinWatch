@@ -29,6 +29,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var myName by mutableStateOf("")
         private set
+    var circleGroups by mutableStateOf<Map<String, String>>(emptyMap())
+        private set
     var busy by mutableStateOf(false)
         private set
     var message by mutableStateOf<String?>(null)
@@ -41,9 +43,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 val id = repo.ensureSignedIn()
-                val name = repo.profile(id)?.name ?: ""
+                val profile = repo.profile(id)
                 uid = id
-                myName = name
+                myName = profile?.name ?: ""
+                circleGroups = profile?.circleGroups ?: emptyMap()
                 ready = true
                 startActivityWatcher(id)
                 ReminderScheduler.schedule(getApplication())
@@ -78,6 +81,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 onDone()
             } catch (e: Exception) {
                 if (!e.isCancellation()) message = e.localizedMessage ?: "Could not save name"
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    fun saveCircleGroups(groups: Map<String, String>, onDone: () -> Unit = {}) {
+        viewModelScope.launch {
+            busy = true
+            try {
+                val id = uid ?: repo.ensureSignedIn()
+                repo.setCircleGroups(id, groups)
+                circleGroups = groups
+                onDone()
+            } catch (e: Exception) {
+                if (!e.isCancellation()) message = e.localizedMessage ?: "Could not save circle groups"
             } finally {
                 busy = false
             }

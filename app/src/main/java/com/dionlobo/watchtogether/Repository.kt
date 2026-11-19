@@ -6,6 +6,7 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
+import com.google.firebase.firestore.SetOptions
 import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -42,7 +43,8 @@ class Repository {
         db.runBatch { batch ->
             batch.set(
                 db.collection("users").document(uid),
-                mapOf("name" to clean, "createdAt" to FieldValue.serverTimestamp())
+                mapOf("name" to clean, "createdAt" to FieldValue.serverTimestamp()),
+                SetOptions.merge()
             )
             groups.documents.forEach { group ->
                 batch.update(
@@ -60,6 +62,33 @@ class Repository {
                 trySend(snap.documents.map { it.toGroup() }.sortedBy { it.name })
             }
         awaitClose { listener.remove() }
+    }
+
+    suspend fun groups(uid: String): List<Group> =
+        db.collection("groups").whereArrayContains("memberUids", uid).get().await()
+            .documents.map { it.toGroup() }.sortedBy { it.name }
+
+    suspend fun groupsWithShow(uid: String, showId: String): List<Group> {
+        val groups = groups(uid)
+        val showRefs = groups.map { it.id to db.collection("groups").document(it.id).collection("shows").document(showId) }
+        val snapshots = showRefs.map { (id, ref) -> id to ref.get().await() }
+        return snapshots.filter { it.second.exists() }.mapNotNull { (id, _) -> groups.firstOrNull { it.id == id } }
+    }
+
+    suspend fun circleGroups(uid: String): Map<String, String> = profile(uid)?.circleGroups ?: emptyMap()
+
+    fun circleGroupsFlow(uid: String): Flow<Map<String, String>> = callbackFlow {
+        val listener = db.collection("users").document(uid).addSnapshotListener { snap, error ->
+            if (error != null || snap == null) return@addSnapshotListener
+            trySend(snap.toUserProfile().circleGroups)
+        }
+        awaitClose { listener.remove() }
+    }
+
+    suspend fun setCircleGroups(uid: String, groups: Map<String, String>) {
+        db.collection("users").document(uid)
+            .set(mapOf("circleGroups" to groups), SetOptions.merge())
+            .await()
     }
 
     fun membersFlow(groupId: String): Flow<List<Member>> = callbackFlow {
@@ -272,7 +301,7 @@ class Repository {
     }
 
     suspend fun markEpisodes(
-        groupId: String,
+        targetGroupIds: List<String>,
         uid: String,
         authorName: String,
         show: ShowEntry,
@@ -281,55 +310,61 @@ class Repository {
     ) {
         val uniqueEpisodes = episodes.distinctBy { it.id }
         if (uniqueEpisodes.isEmpty()) return
-        val watched = db.collection("groups").document(groupId)
-            .collection("watched").document(uid).collection("episodes")
-        val groupMemberUids = memberIds(groupId)
-        val chunks = uniqueEpisodes.chunked(300)
-        val events = db.collection("groups").document(groupId).collection("events")
-        chunks.forEachIndexed { index, chunk ->
-            db.runBatch { batch ->
-                chunk.forEach { ep ->
-                    batch.set(
-                        watched.document(ep.id.toString()),
-                        mapOf(
-                            "season" to ep.season,
-                            "number" to ep.number,
-                            "name" to ep.name,
-                            "showId" to show.id,
-                            "memberUids" to groupMemberUids,
-                            "markedAt" to System.currentTimeMillis()
+        targetGroupIds.distinct().forEach { groupId ->
+            val watched = db.collection("groups").document(groupId)
+                .collection("watched").document(uid).collection("episodes")
+            val groupMemberUids = memberIds(groupId)
+            val events = db.collection("groups").document(groupId).collection("events")
+            val chunks = uniqueEpisodes.chunked(300)
+            chunks.forEachIndexed { index, chunk ->
+                db.runBatch { batch ->
+                    chunk.forEach { ep ->
+                        batch.set(
+                            watched.document(ep.id.toString()),
+                            mapOf(
+                                "season" to ep.season,
+                                "number" to ep.number,
+                                "name" to ep.name,
+                                "showId" to show.id,
+                                "memberUids" to groupMemberUids,
+                                "markedAt" to System.currentTimeMillis()
+                            )
                         )
-                    )
-                }
-                if (index == chunks.lastIndex) {
-                    batch.set(
-                        events.document(),
-                        mapOf(
-                            "uid" to uid,
-                            "authorName" to authorName,
-                            "showId" to show.id,
-                            "memberUids" to groupMemberUids,
-                            "body" to "$authorName $summary of ${show.name}",
-                            "createdAt" to System.currentTimeMillis()
+                    }
+                    if (index == chunks.lastIndex) {
+                        batch.set(
+                            events.document(),
+                            mapOf(
+                                "uid" to uid,
+                                "authorName" to authorName,
+                                "showId" to show.id,
+                                "memberUids" to groupMemberUids,
+                                "body" to "$authorName $summary of ${show.name}",
+                                "createdAt" to System.currentTimeMillis()
+                            )
                         )
-                    )
-                }
-            }.await()
+                    }
+                }.await()
+            }
         }
     }
 
-    suspend fun unmarkEpisode(groupId: String, uid: String, episodeId: Int) {
-        db.collection("groups").document(groupId).collection("watched")
-            .document(uid).collection("episodes").document(episodeId.toString()).delete().await()
+    suspend fun unmarkEpisode(targetGroupIds: List<String>, uid: String, episodeId: Int) {
+        targetGroupIds.distinct().forEach { groupId ->
+            db.collection("groups").document(groupId).collection("watched")
+                .document(uid).collection("episodes").document(episodeId.toString()).delete().await()
+        }
     }
 
-    suspend fun resetShowProgress(groupId: String, uid: String, episodeIds: List<String>) {
-        val episodes = db.collection("groups").document(groupId).collection("watched")
-            .document(uid).collection("episodes")
-        episodeIds.chunked(300).forEach { chunk ->
-            db.runBatch { batch ->
-                chunk.forEach { id -> batch.delete(episodes.document(id)) }
-            }.await()
+    suspend fun resetShowProgress(targetGroupIds: List<String>, uid: String, episodeIds: List<String>) {
+        targetGroupIds.distinct().forEach { groupId ->
+            val episodes = db.collection("groups").document(groupId).collection("watched")
+                .document(uid).collection("episodes")
+            episodeIds.chunked(300).forEach { chunk ->
+                db.runBatch { batch ->
+                    chunk.forEach { id -> batch.delete(episodes.document(id)) }
+                }.await()
+            }
         }
     }
 
@@ -409,5 +444,20 @@ class Repository {
                 )
             }
         }.await()
+    }
+
+    suspend fun updateNote(groupId: String, noteId: String, text: String, isPublic: Boolean) {
+        db.collection("groups").document(groupId).collection("notes").document(noteId)
+            .update(
+                mapOf(
+                    "text" to text.trim(),
+                    "isPublic" to isPublic,
+                    "memberUids" to memberIds(groupId)
+                )
+            ).await()
+    }
+
+    suspend fun deleteNote(groupId: String, noteId: String) {
+        db.collection("groups").document(groupId).collection("notes").document(noteId).delete().await()
     }
 }

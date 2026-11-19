@@ -15,6 +15,7 @@ import androidx.activity.viewModels
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,10 +29,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.Settings
@@ -66,6 +69,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -493,6 +497,27 @@ fun GroupsScreen(vm: MainViewModel, go: (Screen) -> Unit) {
 @Composable
 fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
     var name by remember(vm.myName) { mutableStateOf(vm.myName) }
+    val circles by remember(vm.uid) { vm.repo.groupsFlow(vm.uid!!) }.collectAsState(emptyList())
+    var editingCircle by remember { mutableStateOf<Group?>(null) }
+
+    fun nextGroupLabel(): String {
+        val used = vm.circleGroups.values.mapNotNull { it.removePrefix("Group ").toIntOrNull() }
+        return "Group ${(used.maxOrNull() ?: 0) + 1}"
+    }
+
+    fun saveCircleLabel(circle: Group, label: String?) {
+        val next = vm.circleGroups.toMutableMap()
+        if (label == null) next.remove(circle.id) else next[circle.id] = label
+        vm.saveCircleGroups(next.toMap()) { editingCircle = null }
+    }
+
+    fun pairCircles(circle: Group, other: Group) {
+        val label = vm.circleGroups[other.id] ?: vm.circleGroups[circle.id] ?: nextGroupLabel()
+        val next = vm.circleGroups.toMutableMap()
+        next[circle.id] = label
+        next[other.id] = label
+        vm.saveCircleGroups(next.toMap()) { editingCircle = null }
+    }
 
     Scaffold(
         containerColor = Brand.Paper,
@@ -510,12 +535,12 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
     ) { padding ->
         DecorBackground {
             Column(
-                modifier = Modifier.padding(padding).padding(20.dp).fillMaxSize()
+                modifier = Modifier.padding(padding).padding(20.dp).fillMaxSize().verticalScroll(rememberScrollState())
             ) {
                 ScreenHeader(
                     step = "04 / PREFERENCES",
                     title = "Make it yours.",
-                    subtitle = "Change your name or dim the whole room.",
+                    subtitle = "Change your name, group circles, or dim the room.",
                     accent = Brand.Mint
                 )
                 Spacer(Modifier.height(18.dp))
@@ -544,6 +569,42 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
                 }
                 Spacer(Modifier.height(14.dp))
                 SoftCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(20.dp)) {
+                        Text("CIRCLE SYNC GROUPS", color = Brand.Blue, fontSize = 11.sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "Circles in the same group sync watched episodes straight away. Pick another circle, or leave this one ungrouped to be asked each time.",
+                            color = Brand.Muted,
+                            fontSize = 13.sp
+                        )
+                        Spacer(Modifier.height(14.dp))
+                        if (circles.isEmpty()) {
+                            Text("Join a circle to set up syncing.", color = Brand.Muted)
+                        } else {
+                            circles.forEach { circle ->
+                                Row(
+                                    Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(circle.name, color = Brand.Ink, fontWeight = FontWeight.Bold)
+                                        Text(vm.circleGroups[circle.id] ?: "Ungrouped", color = Brand.Muted, fontSize = 11.sp)
+                                    }
+                                    PunchButton(
+                                        text = "Choose",
+                                        onClick = { editingCircle = circle },
+                                        modifier = Modifier.width(104.dp),
+                                        color = Brand.Surface,
+                                        contentColor = Brand.Ink,
+                                        borderColor = Brand.Border
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(14.dp))
+                SoftCard(modifier = Modifier.fillMaxWidth()) {
                     Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text("DARK MODE", color = Brand.Blue, fontSize = 11.sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
@@ -558,6 +619,57 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
                 }
             }
         }
+    }
+
+    editingCircle?.let { circle ->
+        AlertDialog(
+            onDismissRequest = { editingCircle = null },
+            containerColor = Brand.Surface,
+            shape = RoundedCornerShape(26.dp),
+            title = { Text("Sync ${circle.name}", color = Brand.Ink, fontWeight = FontWeight.Bold) },
+            text = {
+                Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+                    Text(
+                        "Choose a circle to sync with. If it is already grouped, this circle joins that whole group.",
+                        color = Brand.Muted,
+                        fontSize = 13.sp
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    PunchButton(
+                        text = "Ungrouped",
+                        onClick = { saveCircleLabel(circle, null) },
+                        modifier = Modifier.fillMaxWidth(),
+                        color = Brand.InkSoft,
+                        contentColor = Brand.Ink,
+                        borderColor = Brand.Border
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    circles.filter { it.id != circle.id }.forEach { other ->
+                        Row(
+                            Modifier.fillMaxWidth().clickable { pairCircles(circle, other) }.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(other.name, color = Brand.Ink, fontWeight = FontWeight.Bold)
+                                Text(vm.circleGroups[other.id] ?: "Ungrouped", color = Brand.Muted, fontSize = 11.sp)
+                            }
+                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = Brand.Ink)
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    PunchButton(
+                        text = "New group",
+                        onClick = { saveCircleLabel(circle, nextGroupLabel()) },
+                        modifier = Modifier.fillMaxWidth(),
+                        color = Brand.Blue,
+                        contentColor = Brand.OnPrimary
+                    )
+                }
+            },
+            confirmButton = {
+                PunchButton("Close", { editingCircle = null }, Modifier.width(110.dp), color = Brand.InkSoft, contentColor = Brand.Ink, borderColor = Brand.Border)
+            }
+        )
     }
 }
 

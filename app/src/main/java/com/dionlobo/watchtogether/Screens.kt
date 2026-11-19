@@ -36,6 +36,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -77,6 +78,58 @@ private fun epLabel(season: Int, number: Int) =
 
 private data class MarkTarget(val episode: TvEpisode, val earlierUnwatched: List<TvEpisode>)
 
+private enum class WatchedChangeType { MARK, UNMARK, RESET }
+
+private data class PendingWatchedChange(
+    val type: WatchedChangeType,
+    val episodes: List<TvEpisode> = emptyList(),
+    val summary: String = "",
+    val episodeId: Int = 0,
+    val episodeIds: List<String> = emptyList()
+)
+
+private data class SyncPrompt(
+    val change: PendingWatchedChange,
+    val directTargets: Set<String>,
+    val availableTargets: Set<String>,
+    val candidates: List<Group>,
+    val allGroups: List<Group>
+)
+
+private fun expandCircleTargets(
+    selected: Collection<String>,
+    allGroups: List<Group>,
+    circleGroups: Map<String, String>
+): Set<String> {
+    val targets = mutableSetOf<String>()
+    selected.forEach { id ->
+        val label = circleGroups[id]
+        if (label == null) {
+            targets += id
+        } else {
+            allGroups.filter { circleGroups[it.id] == label }.forEach { targets += it.id }
+        }
+    }
+    return targets
+}
+
+private suspend fun applyWatchedChange(
+    vm: MainViewModel,
+    show: ShowEntry,
+    uid: String,
+    change: PendingWatchedChange,
+    targets: Set<String>
+) {
+    if (targets.isEmpty()) return
+    when (change.type) {
+        WatchedChangeType.MARK -> vm.repo.markEpisodes(
+            targets.toList(), uid, vm.myName, show, change.episodes, change.summary
+        )
+        WatchedChangeType.UNMARK -> vm.repo.unmarkEpisode(targets.toList(), uid, change.episodeId)
+        WatchedChangeType.RESET -> vm.repo.resetShowProgress(targets.toList(), uid, change.episodeIds)
+    }
+}
+
 private data class DetailsTarget(
     val title: String,
     val subtitle: String,
@@ -85,6 +138,39 @@ private data class DetailsTarget(
     val meta: String = "",
     val showId: Int? = null
 )
+
+private data class MemberShowTarget(
+    val showName: String,
+    val watched: List<WatchedEpisode>,
+    val total: Int
+)
+
+private fun watchedDetails(episodes: List<WatchedEpisode>): String =
+    episodes.groupBy { it.season }.toSortedMap().entries.joinToString("\n\n") { (season, seasonEpisodes) ->
+        "SEASON $season · ${seasonEpisodes.size} watched\n" +
+            seasonEpisodes.sortedBy { it.number }.joinToString("\n") { ep ->
+                "${epLabel(ep.season, ep.number)}  ${ep.name.ifBlank { "Episode ${ep.number}" }}"
+            }
+    }
+
+@Composable
+private fun rememberEpisodeCounts(showIds: List<String>): Map<String, Int> {
+    val key = showIds.distinct().filter { it.toIntOrNull() != null }.sorted().joinToString(",")
+    var counts by remember(key) { mutableStateOf(emptyMap<String, Int>()) }
+    LaunchedEffect(key) {
+        if (key.isBlank()) {
+            counts = emptyMap()
+            return@LaunchedEffect
+        }
+        val next = mutableMapOf<String, Int>()
+        key.split(",").forEach { id ->
+            val showId = id.toIntOrNull() ?: return@forEach
+            runCatching { TvmazeApi.episodes(showId).size }.onSuccess { next[id] = it }
+        }
+        counts = next
+    }
+    return counts
+}
 
 private fun plainText(html: String): String =
     HtmlCompat.fromHtml(html, HtmlCompat.FROM_HTML_MODE_LEGACY).toString().trim()
@@ -104,6 +190,8 @@ fun GroupDetailScreen(vm: MainViewModel, group: Group, go: (Screen) -> Unit) {
     var tab by remember { mutableStateOf(0) }
     var confirmDelete by remember { mutableStateOf(false) }
     var detailsTarget by remember { mutableStateOf<DetailsTarget?>(null) }
+    var selectedNote by remember { mutableStateOf<Note?>(null) }
+    var editingNote by remember { mutableStateOf<Note?>(null) }
     val context = LocalContext.current
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
@@ -246,12 +334,10 @@ fun GroupDetailScreen(vm: MainViewModel, group: Group, go: (Screen) -> Unit) {
                          }
                          itemsIndexed(notes) { index, note ->
                              AnimatedEnter(index * 50) {
-                                 PunchCard(
-                                     onClick = {
-                                         shows.firstOrNull { it.id == note.showId }?.let { go(Screen.ShowDetail(group, it)) }
-                                     },
-                                     accent = if (note.isPublic) Brand.Mint else Brand.Coral
-                                 ) {
+                                  PunchCard(
+                                      onClick = { selectedNote = note },
+                                      accent = if (note.isPublic) Brand.Mint else Brand.Coral
+                                  ) {
                                      Column(Modifier.padding(16.dp)) {
                                          Text(note.text, style = MaterialTheme.typography.bodyLarge, color = Brand.Ink)
                                          Spacer(Modifier.height(12.dp))
@@ -376,6 +462,39 @@ fun GroupDetailScreen(vm: MainViewModel, group: Group, go: (Screen) -> Unit) {
     }
 
     detailsTarget?.let { DetailsDialog(it) { detailsTarget = null } }
+    selectedNote?.let { note ->
+        NoteDetailsDialog(
+            note = note,
+            shows = shows,
+            isOwner = note.uid == uid,
+            onDismiss = { selectedNote = null },
+            onEdit = {
+                selectedNote = null
+                editingNote = note
+            },
+            onDelete = {
+                selectedNote = null
+                vm.launchApp { vm.repo.deleteNote(group.id, note.id) }
+            },
+            onVisibilityChange = { isPublic ->
+                selectedNote = note.copy(isPublic = isPublic)
+                vm.launchApp { vm.repo.updateNote(group.id, note.id, note.text, isPublic) }
+            }
+        )
+    }
+    editingNote?.let { note ->
+        NoteDialog(
+            label = noteContext(note, shows),
+            initialText = note.text,
+            initialPublic = note.isPublic,
+            actionText = "Save changes",
+            onDismiss = { editingNote = null }
+        ) { text, isPublic ->
+            editingNote = null
+            selectedNote = note.copy(text = text, isPublic = isPublic)
+            vm.launchApp { vm.repo.updateNote(group.id, note.id, text, isPublic) }
+        }
+    }
 }
 
 @Composable
@@ -433,7 +552,12 @@ private fun GroupProgressList(
                                     fontWeight = FontWeight.Bold
                                 )
                                 Spacer(Modifier.weight(1f))
-                                Text("$count/$total", color = Brand.Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text(
+                                    if (total > 0) "$count/$total" else "$count watched",
+                                    color = Brand.Muted,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
                             }
                             Spacer(Modifier.height(5.dp))
                             Box(
@@ -463,8 +587,8 @@ fun GroupProgressScreen(vm: MainViewModel, group: Group, show: ShowEntry, go: (S
         vm.repo.memberWatchedFlow(group.id, memberIds)
     }.collectAsState(emptyMap())
     val counts = members.map { memberWatched[it.uid].orEmpty().count { episode -> episode.showId == show.id } }
-    val total = TvmazeApi.cachedEpisodes(show.id.toInt())?.size
-        ?: memberWatched.values.flatten().filter { it.showId == show.id }.distinctBy { "${it.season}-${it.number}" }.size
+    val episodeCounts = rememberEpisodeCounts(listOf(show.id))
+    val total = episodeCounts[show.id] ?: 0
     val average = if (counts.isEmpty() || total == 0) 0f else counts.average().toFloat() / total
 
     Scaffold(
@@ -521,6 +645,10 @@ fun MemberDetailScreen(vm: MainViewModel, group: Group, member: Member, go: (Scr
     val watchedShows = watched.groupBy { it.showId }.toSortedMap(
         compareBy { showId -> shows.firstOrNull { it.id == showId }?.name ?: showId }
     )
+    val episodeCounts = rememberEpisodeCounts(watchedShows.keys.toList())
+    var selectedShow by remember { mutableStateOf<MemberShowTarget?>(null) }
+    var selectedNote by remember { mutableStateOf<Note?>(null) }
+    var editingNote by remember { mutableStateOf<Note?>(null) }
 
     Scaffold(
         containerColor = Brand.Paper,
@@ -563,26 +691,42 @@ fun MemberDetailScreen(vm: MainViewModel, group: Group, member: Member, go: (Scr
                 }
                 watchedShows.forEach { (showId, episodesWatched) ->
                     item {
-                        val show = shows.firstOrNull { it.id == showId }
-                        val total = show?.let { TvmazeApi.cachedEpisodes(it.id.toInt())?.size } ?: episodesWatched.size
+                        val total = episodeCounts[showId] ?: 0
+                        val fraction = if (total == 0) 0f else episodesWatched.size.toFloat() / total
                         PunchCard(
-                            onClick = { show?.let { go(Screen.ShowDetail(group, it)) } },
+                            onClick = {
+                                selectedShow = MemberShowTarget(
+                                    showName = showName(shows, showId),
+                                    watched = episodesWatched,
+                                    total = total
+                                )
+                            },
                             accent = accents[shows.indexOfFirst { it.id == showId }.coerceAtLeast(0) % accents.size]
                         ) {
                             Column(Modifier.padding(16.dp)) {
-                                Text(showName(shows, showId), color = Brand.Ink, fontWeight = FontWeight.Bold)
-                                Spacer(Modifier.height(4.dp))
-                                Text("${episodesWatched.size} of $total watched", color = Brand.Muted, fontSize = 12.sp)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(showName(shows, showId), color = Brand.Ink, fontWeight = FontWeight.Bold)
+                                        Spacer(Modifier.height(4.dp))
+                                        Text(
+                                            if (total > 0) "${episodesWatched.size} of $total watched" else "${episodesWatched.size} watched",
+                                            color = Brand.Muted,
+                                            fontSize = 12.sp
+                                        )
+                                    }
+                                    Icon(
+                                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                        contentDescription = "View episode details",
+                                        tint = Brand.Ink
+                                    )
+                                }
                                 Spacer(Modifier.height(10.dp))
-                                episodesWatched.groupBy { it.season }.toSortedMap().forEach { (season, seasonEpisodes) ->
-                                    Spacer(Modifier.height(6.dp))
-                                    Text("SEASON $season", color = Brand.Blue, fontSize = 10.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
-                                    Spacer(Modifier.height(3.dp))
-                                    Text(
-                                        seasonEpisodes.joinToString("  ·  ") { epLabel(it.season, it.number) },
-                                        color = Brand.Ink,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold
+                                Box(
+                                    Modifier.fillMaxWidth().height(9.dp).clip(RoundedCornerShape(6.dp)).background(Brand.PaperDim)
+                                ) {
+                                    Box(
+                                        Modifier.fillMaxWidth(fraction).fillMaxHeight().clip(RoundedCornerShape(6.dp))
+                                            .background(Brush.horizontalGradient(listOf(accents[shows.indexOfFirst { it.id == showId }.coerceAtLeast(0) % accents.size], Brand.Mint)))
                                     )
                                 }
                             }
@@ -596,9 +740,7 @@ fun MemberDetailScreen(vm: MainViewModel, group: Group, member: Member, go: (Scr
                 itemsIndexed(notes) { index, note ->
                     AnimatedEnter(index * 50) {
                         PunchCard(
-                            onClick = {
-                                shows.firstOrNull { it.id == note.showId }?.let { go(Screen.ShowDetail(group, it)) }
-                            },
+                            onClick = { selectedNote = note },
                             accent = Brand.Mint
                         ) {
                             Column(Modifier.padding(16.dp)) {
@@ -614,6 +756,75 @@ fun MemberDetailScreen(vm: MainViewModel, group: Group, member: Member, go: (Scr
                     }
                 }
             }
+        }
+    }
+
+    selectedShow?.let { target ->
+        AlertDialog(
+            onDismissRequest = { selectedShow = null },
+            containerColor = Brand.Surface,
+            shape = RoundedCornerShape(26.dp),
+            title = {
+                Column {
+                    Text("WATCHED EPISODES", fontSize = 10.sp, fontWeight = FontWeight.Black, color = Brand.Blue, letterSpacing = 1.sp)
+                    Spacer(Modifier.height(4.dp))
+                    Text(target.showName, color = Brand.Ink, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        if (target.total > 0) "${target.watched.size} of ${target.total} watched" else "${target.watched.size} watched",
+                        color = Brand.Muted,
+                        fontSize = 12.sp
+                    )
+                }
+            },
+            text = {
+                Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+                    Text(
+                        watchedDetails(target.watched),
+                        color = Brand.Ink,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        lineHeight = 18.sp
+                    )
+                }
+            },
+            confirmButton = {
+                PunchButton("Close", { selectedShow = null }, Modifier.width(110.dp), color = Brand.Blue, contentColor = Brand.OnPrimary)
+            }
+        )
+    }
+
+    selectedNote?.let { note ->
+        NoteDetailsDialog(
+            note = note,
+            shows = shows,
+            isOwner = note.uid == uid,
+            onDismiss = { selectedNote = null },
+            onEdit = {
+                selectedNote = null
+                editingNote = note
+            },
+            onDelete = {
+                selectedNote = null
+                vm.launchApp { vm.repo.deleteNote(group.id, note.id) }
+            },
+            onVisibilityChange = { isPublic ->
+                selectedNote = note.copy(isPublic = isPublic)
+                vm.launchApp { vm.repo.updateNote(group.id, note.id, note.text, isPublic) }
+            }
+        )
+    }
+    editingNote?.let { note ->
+        NoteDialog(
+            label = noteContext(note, shows),
+            initialText = note.text,
+            initialPublic = note.isPublic,
+            actionText = "Save changes",
+            onDismiss = { editingNote = null }
+        ) { text, isPublic ->
+            editingNote = null
+            selectedNote = note.copy(text = text, isPublic = isPublic)
+            vm.launchApp { vm.repo.updateNote(group.id, note.id, text, isPublic) }
         }
     }
 }
@@ -653,7 +864,7 @@ private fun addedByText(show: ShowEntry, members: List<Member>) {
 
 private fun noteScopeLabel(note: Note) = when (note.scope) {
     "season" -> "Season ${note.season}"
-    "episode" -> epLabel(note.season, note.episode)
+    "episode" -> "Season ${note.season} · Episode ${note.episode}"
     else -> "Show note"
 }
 
@@ -662,6 +873,113 @@ private fun showName(shows: List<ShowEntry>, showId: String) =
 
 private fun noteContext(note: Note, shows: List<ShowEntry>) =
     "${showName(shows, note.showId)} · ${noteScopeLabel(note)}"
+
+@Composable
+private fun NoteDetailsDialog(
+    note: Note,
+    shows: List<ShowEntry>,
+    isOwner: Boolean,
+    onDismiss: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+    onVisibilityChange: (Boolean) -> Unit
+) {
+    var confirmDelete by remember { mutableStateOf(false) }
+
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            containerColor = Brand.Surface,
+            shape = RoundedCornerShape(26.dp),
+            title = { Text("Delete note?", color = Brand.Ink, fontWeight = FontWeight.Bold) },
+            text = { Text("This cannot be undone.", color = Brand.Muted) },
+            confirmButton = {
+                PunchButton(
+                    text = "Delete",
+                    modifier = Modifier.width(110.dp),
+                    color = Brand.Coral,
+                    contentColor = Brand.OnAccent,
+                    onClick = {
+                        confirmDelete = false
+                        onDelete()
+                    }
+                )
+            },
+            dismissButton = {
+                PunchButton(
+                    text = "Cancel",
+                    modifier = Modifier.width(110.dp),
+                    color = Brand.InkSoft,
+                    contentColor = Brand.Ink,
+                    borderColor = Brand.Border,
+                    onClick = { confirmDelete = false }
+                )
+            }
+        )
+        return
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Brand.Surface,
+        shape = RoundedCornerShape(26.dp),
+        title = {
+            Text(
+                if (isOwner) "YOUR NOTE" else "NOTE",
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Black,
+                color = Brand.Amber,
+                letterSpacing = 1.sp
+            )
+        },
+        text = {
+            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+                Text(noteContext(note, shows), color = Brand.Blue, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(12.dp))
+                Text(note.text, color = Brand.Ink, style = MaterialTheme.typography.bodyLarge)
+                if (isOwner) {
+                    Spacer(Modifier.height(18.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Switch(checked = note.isPublic, onCheckedChange = onVisibilityChange)
+                        Spacer(Modifier.width(8.dp))
+                        Text(if (note.isPublic) "Visible to the group" else "Only visible to me", color = Brand.Ink)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            PunchButton(
+                text = if (isOwner) "Edit" else "Close",
+                modifier = Modifier.width(110.dp),
+                color = if (isOwner) Brand.Blue else Brand.InkSoft,
+                contentColor = if (isOwner) Brand.OnPrimary else Brand.Ink,
+                borderColor = if (isOwner) Color.Unspecified else Brand.Border,
+                onClick = if (isOwner) onEdit else onDismiss
+            )
+        },
+        dismissButton = {
+            if (isOwner) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    PunchButton(
+                        text = "Delete",
+                        modifier = Modifier.width(100.dp),
+                        color = Brand.Coral,
+                        contentColor = Brand.OnAccent,
+                        onClick = { confirmDelete = true }
+                    )
+                    PunchButton(
+                        text = "Close",
+                        modifier = Modifier.width(90.dp),
+                        color = Brand.InkSoft,
+                        contentColor = Brand.Ink,
+                        borderColor = Brand.Border,
+                        onClick = onDismiss
+                    )
+                }
+            }
+        }
+    )
+}
 
 private fun timeText(ts: Long): String {
     if (ts <= 0L) return ""
@@ -687,8 +1005,36 @@ fun ShowDetailScreen(vm: MainViewModel, group: Group, show: ShowEntry, go: (Scre
     var detailsTarget by remember { mutableStateOf<DetailsTarget?>(null) }
     var confirmRemove by remember { mutableStateOf(false) }
     var confirmRewatch by remember { mutableStateOf(false) }
+    var syncPrompt by remember { mutableStateOf<SyncPrompt?>(null) }
+    var syncSelection by remember { mutableStateOf<Set<String>>(emptySet()) }
     var selectedSeason by remember(show.id) { mutableStateOf<Int?>(null) }
     var seasonMenuOpen by remember { mutableStateOf(false) }
+
+    fun runWatchedChange(change: PendingWatchedChange, targets: Set<String>) {
+        if (targets.isEmpty()) return
+        vm.launchApp { applyWatchedChange(vm, show, uid, change, targets) }
+    }
+
+    fun requestWatchedChange(change: PendingWatchedChange) {
+        vm.launchApp {
+            val allGroups = vm.repo.groups(uid)
+            val showGroups = vm.repo.groupsWithShow(uid, show.id)
+            val availableTargets = showGroups.map { it.id }.toSet() + group.id
+            val directTargets = expandCircleTargets(setOf(group.id), allGroups, vm.circleGroups)
+                .intersect(availableTargets) + group.id
+            val sourceLabel = vm.circleGroups[group.id]
+            val candidates = showGroups.filter { candidate ->
+                candidate.id !in directTargets &&
+                    (sourceLabel == null || vm.circleGroups[candidate.id] == null)
+            }
+            if (candidates.isEmpty()) {
+                applyWatchedChange(vm, show, uid, change, directTargets)
+            } else {
+                syncPrompt = SyncPrompt(change, directTargets, availableTargets, candidates, allGroups)
+                syncSelection = candidates.map { it.id }.toSet()
+            }
+        }
+    }
 
     LaunchedEffect(show.id) {
         try {
@@ -877,7 +1223,7 @@ fun ShowDetailScreen(vm: MainViewModel, group: Group, show: ShowEntry, go: (Scre
                         PunchCard(
                             onClick = {
                                 if (isWatched) {
-                                    vm.launchApp { vm.repo.unmarkEpisode(group.id, uid, ep.id) }
+                                    requestWatchedChange(PendingWatchedChange(WatchedChangeType.UNMARK, episodeId = ep.id))
                                 } else {
                                     val index = episodes.indexOfFirst { it.id == ep.id }
                                     val earlierUnwatched = if (index > 0) {
@@ -888,9 +1234,13 @@ fun ShowDetailScreen(vm: MainViewModel, group: Group, show: ShowEntry, go: (Scre
                                     if (earlierUnwatched.isNotEmpty()) {
                                         rangeTarget = MarkTarget(ep, earlierUnwatched)
                                     } else {
-                                        vm.launchApp {
-                                            vm.repo.markEpisodes(group.id, uid, vm.myName, show, listOf(ep), "marked ${epLabel(ep.season, ep.number)}")
-                                        }
+                                        requestWatchedChange(
+                                            PendingWatchedChange(
+                                                WatchedChangeType.MARK,
+                                                episodes = listOf(ep),
+                                                summary = "marked ${epLabel(ep.season, ep.number)}"
+                                            )
+                                        )
                                     }
                                 }
                             },
@@ -971,7 +1321,7 @@ fun ShowDetailScreen(vm: MainViewModel, group: Group, show: ShowEntry, go: (Scre
                     color = Brand.Mint,
                     contentColor = Brand.OnAccent,
                     onClick = {
-                        vm.launchApp { vm.repo.markEpisodes(group.id, uid, vm.myName, show, range, summary) }
+                        requestWatchedChange(PendingWatchedChange(WatchedChangeType.MARK, episodes = range, summary = summary))
                         rangeTarget = null
                     }
                 )
@@ -984,7 +1334,13 @@ fun ShowDetailScreen(vm: MainViewModel, group: Group, show: ShowEntry, go: (Scre
                         color = Brand.Blue,
                         contentColor = Brand.OnPrimary,
                         onClick = {
-                            vm.launchApp { vm.repo.markEpisodes(group.id, uid, vm.myName, show, listOf(target.episode), "marked $labelEnd") }
+                            requestWatchedChange(
+                                PendingWatchedChange(
+                                    WatchedChangeType.MARK,
+                                    episodes = listOf(target.episode),
+                                    summary = "marked $labelEnd"
+                                )
+                            )
                             rangeTarget = null
                         }
                     )
@@ -1037,11 +1393,12 @@ fun ShowDetailScreen(vm: MainViewModel, group: Group, show: ShowEntry, go: (Scre
                     contentColor = Brand.OnAccent,
                     onClick = {
                         confirmRewatch = false
-                        vm.launchApp {
-                            runCatching {
-                                vm.repo.resetShowProgress(group.id, uid, episodes.map { it.id.toString() })
-                            }.onFailure { if (!it.isCancellation()) vm.message = "Could not reset progress: ${it.localizedMessage}" }
-                        }
+                        requestWatchedChange(
+                            PendingWatchedChange(
+                                WatchedChangeType.RESET,
+                                episodeIds = episodes.map { it.id.toString() }
+                            )
+                        )
                     }
                 )
             },
@@ -1094,13 +1451,95 @@ fun ShowDetailScreen(vm: MainViewModel, group: Group, show: ShowEntry, go: (Scre
         )
     }
 
+    syncPrompt?.let { prompt ->
+        val actionLabel = when (prompt.change.type) {
+            WatchedChangeType.MARK -> "mark these episodes"
+            WatchedChangeType.UNMARK -> "unmark this episode"
+            WatchedChangeType.RESET -> "reset this show"
+        }
+        AlertDialog(
+            onDismissRequest = { syncPrompt = null },
+            containerColor = Brand.Surface,
+            shape = RoundedCornerShape(26.dp),
+            title = { Text("Sync across circles?", color = Brand.Ink, fontWeight = FontWeight.Bold) },
+            text = {
+                Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+                    Text(
+                        "These circles also have ${show.name}. Choose any to $actionLabel too. Circles in the same sync group are included automatically.",
+                        color = Brand.Muted,
+                        fontSize = 13.sp
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    prompt.candidates.forEach { candidate ->
+                        Row(
+                            Modifier.fillMaxWidth().clickable {
+                                syncSelection = if (candidate.id in syncSelection) {
+                                    syncSelection - candidate.id
+                                } else {
+                                    syncSelection + candidate.id
+                                }
+                            }.padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(
+                                checked = candidate.id in syncSelection,
+                                onCheckedChange = { checked ->
+                                    syncSelection = if (checked) syncSelection + candidate.id else syncSelection - candidate.id
+                                }
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(candidate.name, color = Brand.Ink, fontWeight = FontWeight.Bold)
+                                Text(vm.circleGroups[candidate.id] ?: "Ungrouped", color = Brand.Muted, fontSize = 11.sp)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                PunchButton(
+                    text = "Sync selected",
+                    modifier = Modifier.width(132.dp),
+                    color = Brand.Mint,
+                    contentColor = Brand.OnAccent,
+                    onClick = {
+                        val targets = (prompt.directTargets + expandCircleTargets(syncSelection, prompt.allGroups, vm.circleGroups))
+                            .intersect(prompt.availableTargets)
+                        syncPrompt = null
+                        runWatchedChange(prompt.change, targets)
+                    }
+                )
+            },
+            dismissButton = {
+                PunchButton(
+                    text = "Only grouped",
+                    modifier = Modifier.width(124.dp),
+                    color = Brand.InkSoft,
+                    contentColor = Brand.Ink,
+                    borderColor = Brand.Border,
+                    onClick = {
+                        syncPrompt = null
+                        runWatchedChange(prompt.change, prompt.directTargets)
+                    }
+                )
+            }
+        )
+    }
+
     detailsTarget?.let { DetailsDialog(it) { detailsTarget = null } }
 }
 
 @Composable
-fun NoteDialog(label: String, onDismiss: () -> Unit, onSave: (String, Boolean) -> Unit) {
-    var text by remember { mutableStateOf("") }
-    var isPublic by remember { mutableStateOf(true) }
+fun NoteDialog(
+    label: String,
+    onDismiss: () -> Unit,
+    initialText: String = "",
+    initialPublic: Boolean = true,
+    actionText: String = "Save",
+    onSave: (String, Boolean) -> Unit
+) {
+    var text by remember(initialText) { mutableStateOf(initialText) }
+    var isPublic by remember(initialPublic) { mutableStateOf(initialPublic) }
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = Brand.Surface,
@@ -1126,7 +1565,7 @@ fun NoteDialog(label: String, onDismiss: () -> Unit, onSave: (String, Boolean) -
         },
         confirmButton = {
             PunchButton(
-                text = "Save",
+                text = actionText,
                 enabled = text.isNotBlank(),
                 modifier = Modifier.width(110.dp),
                 color = Brand.Blue,
