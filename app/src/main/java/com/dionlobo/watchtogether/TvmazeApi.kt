@@ -26,12 +26,16 @@ data class TvEpisodeDto(
     val season: Int? = null,
     val number: Int? = null,
     val airdate: String? = null,
-    val image: TvImage? = null
+    val image: TvImage? = null,
+    val summary: String? = null
 )
 
 interface TvmazeService {
     @GET("search/shows")
     suspend fun search(@Query("q") query: String): List<TvSearchResult>
+
+    @GET("shows/{id}")
+    suspend fun show(@Path("id") showId: Int): TvShow
 
     @GET("shows/{id}/episodes")
     suspend fun episodes(@Path("id") showId: Int): List<TvEpisodeDto>
@@ -45,6 +49,7 @@ object TvmazeApi {
         .create(TvmazeService::class.java)
 
     private val searchCache = LinkedHashMap<String, List<TvShow>>()
+    private val showCache = LinkedHashMap<Int, TvShow>()
     private val episodeCache = LinkedHashMap<Int, List<TvEpisode>>()
 
     private fun <K, V> cachePut(cache: LinkedHashMap<K, V>, key: K, value: V, max: Int) {
@@ -66,6 +71,15 @@ object TvmazeApi {
         result
     }
 
+    fun cachedShow(showId: Int): TvShow? = synchronized(showCache) { showCache[showId] }
+
+    suspend fun show(showId: Int): TvShow = withContext(Dispatchers.IO) {
+        synchronized(showCache) { showCache[showId] }?.let { return@withContext it }
+        val result = service.show(showId)
+        cachePut(showCache, showId, result, 24)
+        result
+    }
+
     fun cachedEpisodes(showId: Int): List<TvEpisode>? = synchronized(episodeCache) {
         episodeCache[showId]
     }
@@ -79,7 +93,9 @@ object TvmazeApi {
                 season = it.season ?: 0,
                 number = it.number ?: 0,
                 airdate = it.airdate ?: "",
-                imageUrl = it.image?.medium ?: ""
+                imageUrl = it.image?.medium ?: "",
+                imageOriginalUrl = it.image?.original ?: "",
+                summary = it.summary ?: ""
             )
         }.sortedWith(compareBy({ it.season }, { it.number }))
         cachePut(episodeCache, showId, result, 24)

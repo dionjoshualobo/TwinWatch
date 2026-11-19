@@ -26,6 +26,7 @@ data class ShowEntry(
     val id: String = "",
     val name: String = "",
     val imageUrl: String = "",
+    val summary: String = "",
     val addedBy: String = "",
     val addedAt: Long = 0L
 )
@@ -36,7 +37,9 @@ data class TvEpisode(
     val season: Int = 0,
     val number: Int = 0,
     val airdate: String = "",
-    val imageUrl: String = ""
+    val imageUrl: String = "",
+    val imageOriginalUrl: String = "",
+    val summary: String = ""
 )
 
 data class WatchedEpisode(
@@ -96,6 +99,7 @@ fun DocumentSnapshot.toShowEntry(): ShowEntry = ShowEntry(
     id = id,
     name = str("name"),
     imageUrl = str("imageUrl"),
+    summary = str("summary"),
     addedBy = str("addedBy"),
     addedAt = long("addedAt")
 )

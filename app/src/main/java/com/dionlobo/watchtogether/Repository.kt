@@ -263,6 +263,7 @@ class Repository {
             mapOf(
                 "name" to show.name,
                 "imageUrl" to (show.image?.medium ?: show.image?.original ?: ""),
+                "summary" to show.summary.orEmpty(),
                 "addedBy" to uid,
                 "memberUids" to memberIds(groupId),
                 "addedAt" to System.currentTimeMillis()
