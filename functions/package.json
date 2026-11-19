@@ -1,0 +1,17 @@
+{
+  "name": "watch-together-functions",
+  "private": true,
+  "main": "index.js",
+  "engines": {
+    "node": "20"
+  },
+  "scripts": {
+    "simulate": "WATCH_TOGETHER_LOCAL_SIMULATION=1 node -e \"require('./notification').simulate().then(console.log)\"",
+    "simulate:pending": "node -e \"require('./send-notifications').simulatePending().then(console.log)\"",
+    "test": "npm run simulate && npm run simulate:pending"
+  },
+  "dependencies": {
+    "firebase-admin": "^13.4.0",
+    "firebase-functions": "^6.3.2"
+  }
+}

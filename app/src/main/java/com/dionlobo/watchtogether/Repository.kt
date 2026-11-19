@@ -18,12 +18,17 @@ class Repository {
     private val auth = FirebaseAuth.getInstance()
     private val db = FirebaseFirestore.getInstance()
     private val messaging = FirebaseMessaging.getInstance()
+    private var resubscribedUid: String? = null
 
     fun currentUid(): String? = auth.currentUser?.uid
 
     suspend fun ensureSignedIn(): String {
-        auth.currentUser?.let { return it.uid }
-        return auth.signInAnonymously().await().user!!.uid
+        val id = auth.currentUser?.uid ?: auth.signInAnonymously().await().user!!.uid
+        if (resubscribedUid != id) {
+            resubscribeToGroups(id)
+            resubscribedUid = id
+        }
+        return id
     }
 
     suspend fun saveProfile(uid: String, name: String) {
@@ -286,6 +291,11 @@ class Repository {
         runCatching { messaging.subscribeToTopic("g_$groupId").await() }
     }
 
+    private suspend fun resubscribeToGroups(uid: String) {
+        val groups = db.collection("groups").whereArrayContains("memberUids", uid).get().await()
+        groups.documents.forEach { subscribe(it.id) }
+    }
+
     suspend fun addShow(groupId: String, show: TvShow, uid: String) {
         val ref = db.collection("groups").document(groupId).collection("shows").document(show.id.toString())
         ref.set(
@@ -340,7 +350,8 @@ class Repository {
                                 "showId" to show.id,
                                 "memberUids" to groupMemberUids,
                                 "body" to "$authorName $summary of ${show.name}",
-                                "createdAt" to System.currentTimeMillis()
+                                "createdAt" to System.currentTimeMillis(),
+                                "fcmPending" to true
                             )
                         )
                     }
@@ -439,7 +450,8 @@ class Repository {
                         "showId" to show.id,
                         "memberUids" to groupMemberUids,
                         "body" to "$authorName wrote a note about $where",
-                        "createdAt" to System.currentTimeMillis()
+                        "createdAt" to System.currentTimeMillis(),
+                        "fcmPending" to true
                     )
                 )
             }
